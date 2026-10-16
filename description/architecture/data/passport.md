@@ -36,21 +36,11 @@ MySQL `resources.passport` 使用可空 JSON 列，SQLite 两张审核表的 pas
 
 ---
 
-## 已有数据库升级
+## 数据库初始化与兼容
 
-升级转换保留业务值：旧非空字符串变为单元素数组，旧空字符串变为 `[]`，SQL NULL 保持 NULL。旧字符串即使是 `a,b` 或 `["a","b"]`，也作为一个完整字符串保留，不擅自拆成多个通行证。
+MySQL 新容器通过[初始化 SQL](../../../../registry-deploy/mysql/init/001-resources.sql)直接创建 JSON 通行证列。当前不再提供旧版 MySQL 字符串列的迁移文件和升级工具，已有结构不会由应用启动自动修改；版本边界见[资源表说明](resource.md#初始化与版本边界)。
 
-SQLite 启动自动升级到 schema 7，在同一事务中重建两张表的数组约束，保留记录、索引、自增进度、审核决定与反馈凭据；不会重新发布旧结论。无效的历史空白值导致事务回滚，保留原库等待核对。
-
-MySQL 新容器通过[初始化 SQL](../../../../registry-deploy/mysql/init/001-resources.sql)直接建 JSON 列。已有数据库停止后端写入并备份后，在 registry-be 根目录执行：
-
-```bash
-python scripts/migrate_passport_arrays.py --apply
-```
-
-迁移脚本先锁表，在原表新增 passport_array 暂存列，保留原 passport，填充并核对全部资源 ID、值与更新时间，再执行[010 数组切换](../../../../registry-deploy/mysql/migrations/010-resource-passport-arrays.sql)。暂存阶段中断可重复执行；JSON 数组列已就绪时仅校验。此脚本不启动模型或访问文件，不迁移消息队列。
-
-更早的资源表先按[资源表旧库升级](resource.md#旧库升级)完成审核拆分与正式表简化，再执行数组升级。MySQL DDL 不是跨数据库事务；SQLite 自动升级不替代 MySQL 显式迁移。
+SQLite 保留独立自动升级能力：旧非空字符串转为单元素数组，旧空字符串转为 `[]`，SQL NULL 保持 NULL。旧字符串即使是 `a,b` 或 `["a","b"]`，也作为完整字符串保留，不擅自拆分。升级保留记录、索引、自增进度、审核决定与反馈凭据，不重新发布历史结论；当前版本及升级步骤见[SQLite 基础设施](../../capability/infrastructure/sqlite.md)。
 
 ---
 
@@ -62,4 +52,4 @@ REGISTRY_TEST_MYSQL_PORT=临时端口 python -m unittest tests.test_resource_mys
 REGISTRY_TEST_MYVECTOR_PORT=临时端口 python -m unittest tests.test_passport_hnsw
 ```
 
-测试隔离数据均在 tests/tmp 或专用临时数据库容器。覆盖数组校验、跨流程保留多个值、拒绝空数组、删除全集核对、多组聚合，以及旧库转换、迁移失败回滚和重复执行；真实 HNSW 验证数组元数据及跨组成员，不调用真实模型。
+测试隔离数据均在 tests/tmp 或专用临时数据库容器。覆盖数组校验、跨流程保留多个值、拒绝空数组、删除全集核对、多组聚合，以及 SQLite 旧库转换、升级失败回滚和重复执行；真实 HNSW 验证数组元数据及跨组成员，不调用真实模型。

@@ -67,22 +67,10 @@ MySQL 不再使用基于状态的函数唯一索引或平台状态索引。SQLit
 
 ---
 
-## 旧库升级
+## 初始化与版本边界
 
-新库直接使用当前初始化脚本。已有库停止后端并备份 MySQL 和 SQLite，在 `registry-be` 根目录执行：
+当前 MySQL 仅维护最终版本的[初始化定义](../../../../registry-deploy/mysql/init/001-resources.sql)，由容器在空数据目录首次启动时执行。历史增量迁移文件及后端 MySQL 升级工具已移除，新部署无需依次执行旧版本变更。
 
-```bash
-python scripts/migrate_resource_reviews.py --apply
-python scripts/migrate_formal_resources.py --apply
-python scripts/migrate_passport_arrays.py --apply
-```
+已有数据卷不会重新执行初始化脚本，`CREATE TABLE IF NOT EXISTS` 不能升级已有表。旧结构如需继续使用，应先备份并单独制定数据转换方案；当前后端按本文的正式资源契约运行。
 
-第一步通过 [008-resource-review-storage.sql](../../../../registry-deploy/mysql/migrations/008-resource-review-storage.sql) 将旧消息与审核信息迁入 SQLite，旧 MySQL 待入库记录完整转存后移出正式表。已经采用最新无状态表时，该旧迁移脚本直接跳过，不会删除重新加入的入库备注。
-
-第二步锁定资源表，按资源 ID 查询 SQLite 中已通过的入库审核，校验来源身份，回填申请人、审核员与两类备注，原推荐列表归档到 SQLite。逐字段验证后调用 [009-formal-resources.sql](../../../../registry-deploy/mysql/migrations/009-formal-resources.sql)，移除状态、推荐字段及相关约束，建立正式源身份唯一索引。
-
-第三步通过[010 数组切换](../../../../registry-deploy/mysql/migrations/010-resource-passport-arrays.sql)将旧单通行证升级为 JSON 数组，保留资源 ID 与更新时间，迁移及重试规则见[通行证数组契约](passport.md#已有数据库升级)。
-
-缺失审核记录、审核身份或备注冲突时中止，不猜测内容、不覆盖审核结论。旧库仍有待入库或 deleted 行时，须先处理历史迁移与删除，不能直接丢弃状态把它们当作正式资源。两条命令可重跑；MySQL DDL 不提供整个跨库过程的事务回滚，不直接对含数据旧库执行删列 SQL。
-
-更早版本的文件名、字段简化与索引迁移继续由部署项目 `mysql/migrations/001` 至 `007` 的历史脚本维护；不要在最新结构上重跑这些旧脚本。
+此边界仅针对 MySQL。SQLite 审核数据库仍由后端启动时独立初始化和自动升级，规则见[SQLite 基础设施](../../capability/infrastructure/sqlite.md)。

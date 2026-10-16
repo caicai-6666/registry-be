@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | `registry-deploy/mysql` | 维护 MySQL 镜像构建与默认字符集配置。 | [MySQL 镜像说明](../../../../registry-deploy/mysql/readme.md) |
 | `registry-deploy` | 维护 Compose 服务、环境变量、网络和数据持久化。 | [统一部署说明](../../../../registry-deploy/readme.md) |
-| `registry-be` | 随业务实现定义数据库访问、表结构和迁移。 | [项目总览](../../project.md) |
+| `registry-be` | 维护数据库访问与正式资源数据契约。 | [项目总览](../../project.md) |
 
 ---
 
@@ -18,7 +18,7 @@
 
 已提供 MySQL 8.4 容器、MyVector 插件与统一部署配置，具体配置和操作步骤以部署项目文档为准。
 
-后端已提供正式资源表与只读检索连接池，待审核申请持久化由 SQLite 承担，字段约束见[注册中心资源表契约](../../architecture/data/resource.md)。建表 SQL 由 `registry-deploy/mysql/init/` 维护并打包进 MySQL 镜像，在空数据目录首次启动时执行。资源仓库只初始化连接池，不执行建表；已有数据卷不会重跑脚本，后续结构变化需通过显式迁移处理。
+后端已提供正式资源表与只读检索连接池，待审核申请持久化由 SQLite 承担，字段约束见[注册中心资源表契约](../../architecture/data/resource.md)。建表 SQL 由 `registry-deploy/mysql/init/` 维护并打包进 MySQL 镜像，在空数据目录首次启动时执行。资源仓库只初始化连接池，不执行建表；已有数据卷不会重跑脚本，当前仅保留最终版本初始化定义，不再提供历史 MySQL 迁移文件；旧结构处理边界见[资源表说明](../../architecture/data/resource.md#初始化与版本边界)。
 
 后端已提供[服务入口与容器配置](../application/runtime.md)，并接入 Compose，等待 MySQL 健康检查通过后启动。消息中间件部署仍由对应项目维护。
 

@@ -151,7 +151,7 @@ docker compose up -d --build --wait mysql
 cd ../registry-be
 ```
 
-新空卷由容器初始化正式资源表、向量缓存表和 MyVector 插件，后端不负责创建 MySQL 表。已有数据库升级须按[迁移说明](description/architecture/data/resource.md#旧库升级)操作；SQLite 在应用启动时自动升级。
+新空卷由容器初始化正式资源表、向量缓存表和 MyVector 插件，后端不负责创建 MySQL 表。MySQL 仅保留最终版本初始化定义，已有卷不会自动更新表结构，具体见[版本边界](description/architecture/data/resource.md#初始化与版本边界)；SQLite 在应用启动时自动升级。
 
 中间件由独立项目部署，默认本机地址为 `http://127.0.0.1:22000`。启动后端前确认中间件及模型服务已准备好。
 

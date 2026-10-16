@@ -45,7 +45,7 @@ SQLite 部分唯一索引约束 `(source_platform, source_id)` 在 pending 入�
 
 ## 部署与验证
 
-新库初始化包含正式源身份唯一约束；已有库通过[资源表迁移命令](../../architecture/data/resource.md#旧库升级)回填入库备注并更新索引，不直接执行历史活跃状态索引脚本。
+新库初始化包含正式源身份唯一约束；当前不再提供旧版 MySQL 索引迁移脚本，版本边界见[资源表说明](../../architecture/data/resource.md#初始化与版本边界)。
 
 ```bash
 python -m unittest discover -s tests -p 'test_source_identity.py'
