@@ -1,0 +1,28 @@
+# OpenAI 官方 SDK，使用 AsyncOpenAI 发起异步请求。
+openai==2.54.0
+
+# MySQL 异步驱动，包含 MySQL 8 的 RSA 认证依赖。
+aiomysql[rsa]==0.3.2
+
+# Web API 框架与 ASGI 服务运行器。
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+
+# 中间件异步 HTTP、环境变量读取与会话响应校验。
+httpx==0.28.1
+python-dotenv==1.2.4
+pydantic==2.14.1
+
+# SQLite 引擎由 Python 标准库 sqlite3 提供，此包支持异步访问。
+aiosqlite==0.22.1
+
+# 审核人员 YAML 配置的安全加载。
+PyYAML==6.0.3
+
+# 知识索引与智能体工作流。
+llama-index==0.14.25
+llama-index-embeddings-openai-like==0.4.0
+langgraph==1.2.14
+
+# PDF 内存逐页渲染，与合同服务使用相同的渲染库。
+PyMuPDF==1.28.2
