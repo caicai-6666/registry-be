@@ -105,6 +105,7 @@ class StoredResource:
     source_id: str | None
     file: StoredFile
     resource_id: int | None = None
+    file_level: int | None = None
 
 
 class ActiveSourceConflict(ValueError):

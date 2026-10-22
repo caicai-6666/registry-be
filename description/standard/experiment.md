@@ -19,7 +19,7 @@
 
 ## 测试隔离与清理
 
-测试统一使用 `tests.support.temporary_directory()` 创建临时目录，结束后清理其内容。共享临时根目录加入 Git 忽略规则，测试固定样本保留在版本管理中。
+测试统一使用 `tests.support.temporary_directory()` 创建临时目录，结束后清理其内容。`tests/`、`experiment/` 和 `scripts/` 整体不纳入 Git，固定样本、测试代码及实验工具均仅在本地保留；新克隆需另行取得所需工具和样本。只有项目描述与规范文档随仓库交付，具体允许清单见[版本管理范围](../capability/application/runtime.md#版本管理范围)。
 
 创建应用、文件存储和持久化服务时显式设置测试 `resource_root`，不能因关闭后台服务而继续使用真实 `data/` 默认路径。配置测试可以断言生产默认路径，但不得在该路径上产生副作用。
 

@@ -16,9 +16,6 @@ pydantic==2.14.1
 # SQLite 引擎由 Python 标准库 sqlite3 提供，此包支持异步访问。
 aiosqlite==0.22.1
 
-# 审核人员 YAML 配置的安全加载。
-PyYAML==6.0.3
-
 # 知识索引与智能体工作流。
 llama-index==0.14.25
 llama-index-embeddings-openai-like==0.4.0

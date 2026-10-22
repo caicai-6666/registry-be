@@ -2,6 +2,8 @@
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
+from app.model.platform_admin import PlatformAdminProfile
+
 
 class PlatformResponse(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -10,6 +12,7 @@ class PlatformResponse(BaseModel):
     name: str = Field(description="平台名称。")
     description: str = Field(description="平台用途描述。")
     is_alive: bool = Field(description="最近一次平台同步确认的中间件会话存活状态。")
+    admins: list[PlatformAdminProfile] = Field(description="平台管理员资料列表，每项为 userid、名称及头像文件名；无管理员时为空数组。")
 
 
 class PlatformSyncTimeResponse(BaseModel):

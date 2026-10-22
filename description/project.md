@@ -8,9 +8,11 @@
 
 知识沉淀注册中心后端面向知识沉淀体系中的各个子平台，集中接收和审核数据入库、数据删除申请，并向子平台反馈审核结果，支持子平台据此处理数据。
 
+本项目提供[已有员工资料手动刷新](capability/application/personnel-refresh.md)，使用钉钉通讯录更新姓名和部门，并增量同步中央用户名；不承担用户登录。
+
 本项目同时提供一系列智能体功能，辅助并赋能注册中心的管理工作。具体能力与使用场景将在后续需求中逐步明确。
 
-已提供独立的[人员系统](capability/application/personnel.md)，通过本地人员配置、密钥登录和免登码识别人工审核人；[入库审核接口](api/ingestion-review.md)使用登录身份确定最终审核人。
+用户登录、用户及平台管理员全表注册由知识后端负责；本项目的[人员身份服务](capability/application/personnel.md)直接查询中间件用户 token，并维护用户权限与平台管理员；[入库审核接口](api/ingestion-review.md)使用登录身份确定最终审核人。 所有 registry 业务接口统一要求中央登录有效且具有注册中心管理权，具体依赖与错误边界见[管理员授权](capability/application/authorization.md)。
 
 ---
 
@@ -47,6 +49,8 @@
 智能体功能用于支持注册中心管理工作，其具体工作流及接入位置随功能设计逐步补充。
 
 ---
+
+正式文件支持 [管理员等级调整](capability/application/file-level-adjustment.md)，本地更新后发布中间件通知，并在 SQLite 独立日志中保存变更及发布凭据。
 
 ## 后续完善方向
 

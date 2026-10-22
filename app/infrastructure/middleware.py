@@ -8,8 +8,13 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, TypeAdapter, model
 
 from app.model.resource import IngestionAcknowledgement, IngestionDelivery, IngestionFileReference
 from app.model.platform import PlatformInfo
+from app.model.platform_admin import ADMIN_USERIDS, PlatformAdminRequest, PlatformAdminChange
 from app.model.passport import normalize_passports
+from app.model.file_level import FILE_LEVEL
 from app.model.deletion import DeletionAcknowledgement, DeletionDelivery
+from app.model.middleware_user import (
+    MiddlewareUserInfo, MiddlewareUserLoginStatus, MiddlewareUserPatch,
+)
 
 _PLATFORM_LIST = TypeAdapter(list[PlatformInfo])
 
@@ -77,12 +82,64 @@ class MiddlewareClient:
         return self._validate_response(response, MiddlewareLoginResponse, platform_code)
 
     async def heartbeat(self, platform_code: str, token: SecretStr) -> MiddlewareSessionResponse:
-        # 当前契约仅使用令牌识别平台，不发送 JSON 身份或其他请求体。
+        # 平台心跳只续期平台会话，不携带或修改任何用户登录状态。
         response = await self._http.post(
             "middleware-service/api/platform/heartbeat",
             headers={"Authorization": f"Bearer {token.get_secret_value()}"},
         )
         return self._validate_response(response, MiddlewareSessionResponse, platform_code)
+
+    async def update_user_info(self, update: MiddlewareUserPatch, token: SecretStr) -> MiddlewareUserInfo:
+        body = update.model_dump(exclude_unset=True)
+        response = await self._http.post('middleware-service/api/user/update',
+            headers={'Authorization': f'Bearer {token.get_secret_value()}'}, json=body)
+        response.raise_for_status()
+        if response.status_code != 200:
+            raise ValueError('用户资料更新必须返回 200')
+        user = MiddlewareUserInfo.model_validate(response.json())
+        if user.userid != update.userid or any(getattr(user, field) != value for field, value in body.items()):
+            raise ValueError('用户资料更新响应与请求不一致')
+        return user
+
+    async def set_platform_admin(self, platform_code: str, userid: str, enabled: bool, token: SecretStr) -> bool:
+        if type(enabled) is not bool:
+            raise ValueError('管理员变更标志必须为布尔值')
+        request = PlatformAdminRequest(platform_code=platform_code, userid=userid)
+        operation = 'add' if enabled else 'remove'
+        response = await self._http.post(f'middleware-service/api/platform/admins/{operation}',
+            headers={'Authorization': f'Bearer {token.get_secret_value()}'},
+            json=request.model_dump())
+        response.raise_for_status()
+        if response.status_code != 200:
+            raise ValueError('管理员变更必须返回 200')
+        result = PlatformAdminChange.model_validate(response.json())
+        if result.platform_code != platform_code or result.userid != userid:
+            raise ValueError('管理员变更响应与请求不一致')
+        return result.changed
+
+    async def touch_user_login(self, access_token: str, token: SecretStr) -> MiddlewareUserLoginStatus:
+        """使用用户 token 查询中央身份；Authorization 始终携带本平台凭据。"""
+        if not isinstance(access_token, str) or not access_token.strip():
+            raise ValueError('用户 access_token 不能为空')
+        response = await self._http.post('middleware-service/api/user/login-cache',
+            headers={'Authorization': f'Bearer {token.get_secret_value()}'},
+            json={'access_token': access_token})
+        response.raise_for_status()
+        if response.status_code != 200:
+            raise ValueError('用户登录缓存查询必须返回 200')
+        return MiddlewareUserLoginStatus.model_validate(response.json())
+
+    async def list_current_platform_admins(self, token: SecretStr) -> tuple[str, ...]:
+        # 目标平台来自 Bearer 身份；不能通过 query 指定其他平台。
+        response = await self._http.get('middleware-service/api/platform/admins/list',
+            headers={'Authorization': f'Bearer {token.get_secret_value()}'})
+        response.raise_for_status()
+        if response.status_code != 200:
+            raise ValueError('平台管理员查询必须返回 200')
+        userids = ADMIN_USERIDS.validate_python(response.json(), strict=True)
+        if len(userids) != len(set(userids)):
+            raise ValueError('平台管理员响应包含重复 userid')
+        return tuple(sorted(userids))
 
     async def pull_ingestion(self, token: SecretStr) -> IngestionDelivery | None:
         response = await self._http.post(
@@ -144,12 +201,12 @@ class MiddlewareClient:
             raise ValueError("拒绝审核意见不能为空且最多 10000 字符")
         return await self.publish_ingestion_result(
             request_id=delivery.message.message_id, target_platform_code=delivery.message.platform_code,
-            token=token, note=note, reviewer="注册中心自动审核员", passport=[],
+            token=token, note=note, reviewer="注册中心自动审核员", passport=[], file_level=0,
         )
 
     async def publish_ingestion_result(
         self, *, request_id: str, target_platform_code: str, token: SecretStr,
-        note: str, reviewer: str, passport: list[str],
+        note: str, reviewer: str, passport: list[str], file_level: int,
     ) -> str:
         """人工与自动审核共用反馈契约：非空数组表示通过，空数组表示拒绝。"""
         for value, maximum in ((request_id, 128), (target_platform_code, 128), (reviewer, 200)):
@@ -158,11 +215,12 @@ class MiddlewareClient:
         if not isinstance(note, str) or len(note) > 10000:
             raise ValueError("审核反馈意见或通行证不合法")
         passport = normalize_passports(passport)
+        file_level = FILE_LEVEL.validate_python(file_level)
         response = await self._http.post(
             "middleware-service/api/ingestion-results/publish",
             headers={"Authorization": f"Bearer {token.get_secret_value()}"},
             json={"request_id": request_id, "target_platform_code": target_platform_code,
-                  "note": note, "reviewer": reviewer, "passport": passport},
+                  "note": note, "reviewer": reviewer, "passport": passport, "file_level": file_level},
         )
         response.raise_for_status()
         if response.status_code != 201:
@@ -220,4 +278,23 @@ class MiddlewareClient:
         response.raise_for_status()
         if response.status_code != 201:
             raise ValueError("删除结果发布必须返回 201")
+        return IngestionResultPublished.model_validate(response.json()).message_id
+
+    async def publish_file_level_adjustment(self, *, source_id: str, target_platform_code: str,
+                                           file_level: int, note: str, reviewer: str, token: SecretStr) -> str:
+        """发布源平台文件等级调整；409 不能证明本次载荷已经发布。"""
+        from app.model.file_level import FILE_LEVEL
+        level = FILE_LEVEL.validate_python(file_level)
+        for value, maximum in ((source_id, 128), (target_platform_code, 128), (reviewer, 200)):
+            if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+                raise ValueError("等级调整身份字段不合法")
+        if not isinstance(note, str) or len(note) > 10000:
+            raise ValueError("等级调整备注不合法")
+        response = await self._http.post("middleware-service/api/file-permission-adjustments/publish",
+            headers={"Authorization": f"Bearer {token.get_secret_value()}"},
+            json={"source_id": source_id, "target_platform_code": target_platform_code,
+                  "file_level": level, "note": note, "reviewer": reviewer})
+        response.raise_for_status()
+        if response.status_code != 201:
+            raise ValueError("文件等级调整发布必须返回 201")
         return IngestionResultPublished.model_validate(response.json()).message_id

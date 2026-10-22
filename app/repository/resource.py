@@ -11,6 +11,7 @@ import aiomysql
 from app.config.database import MySQLSettings, load_mysql_settings
 from app.model.resource import StoredFile, StoredResource
 from app.model.deletion import DeletionResource
+from app.model.file_level import FILE_LEVEL
 from app.model.passport import encode_passports, decode_passports, passport_record, same_passports
 
 
@@ -56,7 +57,7 @@ class MySQLResourceRepository:
     def _stored(row) -> StoredResource:
         # 文件标识与入库消息 ID 相同（消息契约校验）；DTO 保留运行时标识，不存储消息列。
         return StoredResource(row["file_url"].rsplit(".", 1)[0], row["source_platform"], row["source_id"],
-                              StoredFile(row["file_url"]), row["id"])
+                              StoredFile(row["file_url"]), row["id"], row.get("file_level"))
 
     async def find(self, source_platform: str, file_url: str, *, resource_id: int | None = None) -> StoredResource | None:
         if resource_id is not None:
@@ -66,7 +67,7 @@ class MySQLResourceRepository:
             async with self.pool.acquire() as connection, connection.cursor(aiomysql.DictCursor) as cursor:
                 # 跨库提交间隙用唯一平台附件键恢复。
                 await cursor.execute(
-                    "SELECT id,source_platform,source_id,file_url FROM resources "
+                    "SELECT id,source_platform,source_id,file_url,file_level FROM resources "
                     "WHERE source_platform=%s AND file_url=%s",
                     (source_platform, file_url),
                 )
@@ -79,7 +80,7 @@ class MySQLResourceRepository:
         async with asyncio.timeout(self._settings.operation_timeout_seconds):
             async with self.pool.acquire() as connection, connection.cursor(aiomysql.DictCursor) as cursor:
                 await cursor.execute(
-                    "SELECT id,source_platform,source_id,file_url FROM resources WHERE id=%s",
+                    "SELECT id,source_platform,source_id,file_url,file_level FROM resources WHERE id=%s",
                     (resource_id,),
                 )
                 row = await cursor.fetchone()
@@ -98,7 +99,7 @@ class MySQLResourceRepository:
         async with asyncio.timeout(self._settings.operation_timeout_seconds):
             async with self.pool.acquire() as connection, connection.cursor(aiomysql.DictCursor) as cursor:
                 await cursor.execute(
-                    "SELECT id,source_platform,source_id,file_url FROM resources "
+                    "SELECT id,source_platform,source_id,file_url,file_level FROM resources "
                     "WHERE source_platform=%s AND source_id=%s AND file_url <> %s "
                     "ORDER BY id LIMIT 1",
                     (source_platform,source_id,exclude_file_url),
@@ -128,19 +129,45 @@ class MySQLResourceRepository:
         async with asyncio.timeout(self._settings.operation_timeout_seconds):
             async with self.pool.acquire() as connection, connection.cursor(aiomysql.DictCursor) as cursor:
                 await cursor.execute(
-                    "SELECT id,source_platform,name,applicant,reviewer,created_at AS ingested_at,abstract,passport "
+                    "SELECT id,source_platform,name,applicant,reviewer,created_at AS ingested_at,abstract,passport,file_level "
                     "FROM resources ORDER BY id",
                 )
                 rows = await cursor.fetchall()
         # MySQL DATETIME 不携带时区；本项目按 UTC 存储，连接也固定为 UTC。
         return [{**passport_record(row), "ingested_at": row["ingested_at"].replace(tzinfo=timezone.utc)} for row in rows]
 
+    async def adjust_file_level(self, adjustment: dict) -> None:
+        """锁定正式文件，仅修改等级；重试接受已经提交的目标等级。"""
+        from app.model.file_level_adjustment import FileLevelAdjustmentError
+        level = FILE_LEVEL.validate_python(adjustment["file_level"])
+        await self.initialize()
+        async with asyncio.timeout(self._settings.operation_timeout_seconds):
+            async with self.pool.acquire() as connection:
+                await connection.begin()
+                try:
+                    async with connection.cursor(aiomysql.DictCursor) as cursor:
+                        await cursor.execute("SELECT id,source_platform,source_id,file_url,file_level FROM resources WHERE id=%s FOR UPDATE",
+                                             (int(adjustment["resource_id"]),))
+                        row = await cursor.fetchone()
+                        if row is None:
+                            raise FileLevelAdjustmentError("正式文件不存在", status_code=404)
+                        if (any(row[key] != adjustment[key] for key in ("source_platform", "source_id", "file_url"))
+                                or row["file_level"] not in (adjustment["previous_file_level"], level)):
+                            raise FileLevelAdjustmentError("文件身份或等级已变化，请核对调整日志", status_code=409,
+                                                           log_id=adjustment["id"], database_updated=None)
+                        await cursor.execute("UPDATE resources SET file_level=%s WHERE id=%s", (level, row["id"]))
+                    await connection.commit()
+                except BaseException:
+                    await asyncio.shield(connection.rollback())
+                    raise
+
     @asynccontextmanager
     async def approve_ingestion(self, review: dict):
         """在文件完整晋升后提交正式资源；重试只复用全部入库快照一致的记录。"""
         fields = ("source_platform", "source_id", "file_url", "name", "abstract", "applicant", "applicant_note",
-                  "reviewer", "reviewer_note", "requested_at", "embedding", "passport")
+                  "reviewer", "reviewer_note", "requested_at", "embedding", "passport", "file_level")
         values = {key: review[key] for key in fields}
+        values["file_level"] = FILE_LEVEL.validate_python(values["file_level"])
         values["requested_at"] = datetime.fromisoformat(review["requested_at"]).astimezone(timezone.utc).replace(tzinfo=None)
         vector = json.loads(values["embedding"]) if values["embedding"] is not None else None
         await self.initialize()
@@ -213,7 +240,7 @@ class MySQLResourceRepository:
         async with asyncio.timeout(self._settings.operation_timeout_seconds):
             async with self.pool.acquire() as connection, connection.cursor(aiomysql.DictCursor) as cursor:
                 await cursor.execute(
-                    "SELECT id,source_platform,source_id,file_url,passport FROM resources "
+                    "SELECT id,source_platform,source_id,file_url,passport,file_level FROM resources "
                     "WHERE source_platform=%s AND source_id=%s ORDER BY id LIMIT 2",
                     (source_platform, source_id),
                 )
@@ -225,4 +252,4 @@ class MySQLResourceRepository:
         row = rows[0]
         row = passport_record(row)
         return DeletionResource(resource_id=row["id"], **{key: row[key] for key in
-            ("source_platform", "source_id", "file_url", "passport")})
+            ("source_platform", "source_id", "file_url", "passport", "file_level")})

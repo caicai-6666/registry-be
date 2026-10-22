@@ -7,7 +7,9 @@ from fastapi import Depends, Header, HTTPException, Path, Request, status
 
 from app.service.auth import AuthService
 from app.repository.resource import MySQLResourceRepository
-from app.user import ReviewerUser
+from app.auth.model import AuthenticatedUser
+from app.service.platform_admin import PlatformAdminService
+from app.auth.error import AuthUnavailable
 from app.service.ingestion_review import IngestionReviewService
 from app.service.deletion_review import DeletionReviewService
 from app.model.review import ReviewConflict, ReviewNotFound, ReviewUnavailable
@@ -15,7 +17,10 @@ from app.model.review import ReviewConflict, ReviewNotFound, ReviewUnavailable
 
 def get_auth_service(request: Request) -> AuthService:
     """从应用生命周期中取得进程内认证服务。"""
-    return request.app.state.auth_service
+    service = getattr(request.app.state, "auth_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="中央认证服务暂不可用", headers={"Cache-Control": "no-store"})
+    return service
 
 
 AuthServiceDependency = Annotated[AuthService, Depends(get_auth_service)]
@@ -85,8 +90,8 @@ def ingestion_review_error(error: Exception) -> HTTPException:
     return HTTPException(status_code=code, detail=detail, headers={"Cache-Control": "no-store"})
 
 
-def _bearer_login_code(authorization: str | None) -> str | None:
-    """解析严格的 `Authorization: Bearer <免登码>` 请求头。"""
+def _bearer_access_token(authorization: str | None) -> str | None:
+    """解析严格的 `Authorization: Bearer <access_token>` 请求头。"""
     if authorization is None:
         return None
     parts = authorization.strip().split()
@@ -95,43 +100,45 @@ def _bearer_login_code(authorization: str | None) -> str | None:
     return parts[1] or None
 
 
-async def require_authenticated_user(
+async def get_platform_admin_service(request: Request) -> PlatformAdminService:
+    service = getattr(request.app.state, 'platform_admin_service', None)
+    if service is None:
+        raise HTTPException(status_code=503, detail='平台管理员服务暂不可用',
+                            headers={'Cache-Control': 'no-store'})
+    return service
+
+
+PlatformAdminServiceDependency = Annotated[PlatformAdminService, Depends(get_platform_admin_service)]
+
+
+async def require_platform_admin(
+    request: Request,
     service: AuthServiceDependency,
-    authorization: Annotated[
-        str | None,
-        Header(
-            alias="Authorization",
-            description="使用登录接口取得的 Bearer 免登码。",
-        ),
-    ] = None,
-) -> ReviewerUser:
-    """校验免登码，取得服务端人员快照；当前没有角色权限分级。"""
-    login_code = _bearer_login_code(authorization)
-    user = (
-        await service.resolve_user(login_code)
-        if login_code is not None
-        else None
-    )
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="免登码无效或已过期",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    authorization: Annotated[str | None, Header(alias="Authorization",
+        description="知识后端签发的中央用户 Bearer token；对应用户须具有 registry 管理权限。")] = None,
+) -> AuthenticatedUser:
+    """唯一业务认证入口：先确认中央用户已登录，再验证注册中心管理权限。"""
+    access_token = _bearer_access_token(authorization)
+    try:
+        user = await service.resolve_user(access_token) if access_token is not None else None
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="access-token 无效或已过期",
+                headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"})
+        # 只有登录验证成功后才取得管理服务并查询名单；不提供只验证登录的依赖出口。
+        admins = await get_platform_admin_service(request)
+        allowed = await admins.is_current_platform_admin(user)
+    except AuthUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error),
+                            headers={"Cache-Control": "no-store"}) from None
+    if not allowed:
+        raise HTTPException(status_code=403, detail='无权管理当前平台',
+                            headers={'Cache-Control': 'no-store'})
     return user
 
 
-AuthenticatedUserDependency = Annotated[
-    ReviewerUser, Depends(require_authenticated_user)
-]
+PlatformAdminUserDependency = Annotated[AuthenticatedUser, Depends(require_platform_admin)]
 
-
-async def require_reviewer_user(user: AuthenticatedUserDependency) -> str:
-    """为人工审核接口注入可信的审核人名称。"""
-    return user.name
-
-
-ReviewerUserDependency = Annotated[str, Depends(require_reviewer_user)]
 
 __all__ = [
     "DeletionReviewServiceDependency",
@@ -144,10 +151,10 @@ __all__ = [
     "ingestion_review_error",
     "ResourceRepositoryDependency",
     "get_resource_repository",
-    "AuthenticatedUserDependency",
     "AuthServiceDependency",
-    "ReviewerUserDependency",
     "get_auth_service",
-    "require_reviewer_user",
-    "require_authenticated_user",
+    "get_platform_admin_service",
+    "PlatformAdminServiceDependency",
+    "require_platform_admin",
+    "PlatformAdminUserDependency",
 ]

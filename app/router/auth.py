@@ -1,34 +1,14 @@
-"""审核用户登录接口。"""
+"""查询当前注册中心管理员身份；用户登录由知识后端负责。"""
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Response
 
-from app.router.dependency import AuthServiceDependency
-from app.schema.auth import LoginRequest, LoginResponse
-from app.service.auth import InvalidReviewerSecretError
+from app.auth.model import RegistryAdminIdentity
+from app.router.dependency import PlatformAdminUserDependency
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-@router.post(
-    "/login",
-    response_model=LoginResponse,
-    summary="使用审核用户密钥获取免登码",
-)
-async def login(
-    payload: LoginRequest,
-    service: AuthServiceDependency,
-) -> LoginResponse:
-    """校验唯一审核用户密钥并返回审核人名称与限时免登码。"""
-    try:
-        result = await service.login(payload.secret_key.get_secret_value())
-    except InvalidReviewerSecretError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="审核用户密钥无效",
-        ) from exc
-    return LoginResponse(
-        login_code=result.login_code,
-        user_name=result.user_name,
-    )
 
-
-__all__ = ["router"]
+@router.get('/me', response_model=RegistryAdminIdentity, summary="查询当前注册中心管理员身份")
+async def current_user(user: PlatformAdminUserDependency, response: Response):
+    response.headers['Cache-Control'] = 'no-store'
+    return RegistryAdminIdentity(userid=user.userid, username=user.name)

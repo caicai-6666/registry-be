@@ -6,17 +6,17 @@
 
 | 接口 | 方法 | 完整路径 |
 | --- | --- | --- |
-| [获取待删除审核列表](#获取待删除审核列表) | `GET` | `/registry/api/deletion-review/list` |
-| [按审核员获取删除审核历史](#按审核员获取删除审核历史) | `GET` | `/registry/api/deletion-review/history` |
-| [确定删除最终审核结果](#确定删除最终审核结果) | `POST` | `/registry/api/deletion-review/{review_id}/decision` |
+| [获取待删除审核列表](#获取待删除审核列表) | `GET` | `/knowledge-accumulation/registry/api/deletion-review/list` |
+| [按审核员获取删除审核历史](#按审核员获取删除审核历史) | `GET` | `/knowledge-accumulation/registry/api/deletion-review/history` |
+| [确定删除最终审核结果](#确定删除最终审核结果) | `POST` | `/knowledge-accumulation/registry/api/deletion-review/{review_id}/decision` |
 
 ---
 
 ## 获取待删除审核列表
 
-`GET /registry/api/deletion-review/list` 返回尚未确定人工决定的删除申请，按审核 ID 升序排列。
+`GET /knowledge-accumulation/registry/api/deletion-review/list` 返回尚未确定人工决定的删除申请，按审核 ID 升序排列。
 
-**认证：** `Authorization: Bearer <login_code>`，通过[人员登录](auth.md#使用密钥登录)取得。响应禁止缓存。
+**认证：** 此外必须具有注册中心当前平台（默认 `registry`）的管理权限，文件访问等级不能替代管理权限。  `Authorization: Bearer <access_token>`，使用知识后端签发的用户 token，资料可通过[当前身份接口](auth.md#获取当前身份)查询。响应禁止缓存。
 
 **请求参数：** 无 path、query 参数，无请求体。
 
@@ -30,6 +30,7 @@
     "source_platform": "contract-pheno",
     "source_id": "source-1",
     "passport": ["p1", "p2"],
+    "file_level": 3,
     "name": "设备采购合同",
     "abstract": "设备采购、交付及验收约定。",
     "uploader": "原文件上传人",
@@ -40,14 +41,14 @@
 ]
 ```
 
-`id` 是删除审核 ID；`resource_id` 是待删除的正式资源 ID，用于原件读取。`passport` 是申请提交的原通行证数组；人员、备注及申请时间取自删除申请。历史未知的 `source_id`、`passport`、`applicant` 可以为 null。`name`、`abstract`、`uploader` 是申请时保存的文件业务名称、摘要及原上传人快照，与删除申请人分开；名称不是磁盘文件名。描述直接读取 SQLite，删除后继续保留；历史无法恢复时返回 null，不要求再查询正式文件目录。待审响应不包含最终审核员。
+`id` 是删除审核 ID；`resource_id` 是待删除的正式资源 ID，用于原件读取。`passport` 是申请提交的原通行证数组；人员、备注及申请时间取自删除申请。历史未知的 `source_id`、`passport`、`applicant` 可以为 null。`name`、`abstract`、`uploader` 是申请时保存的文件业务名称、摘要及原上传人快照，与删除申请人分开；名称不是磁盘文件名。描述直接读取 SQLite，删除后继续保留；历史无法恢复时返回 null，不要求再查询正式文件目录。`file_level` 是从正式资源取得并保存在 SQLite 的文件等级快照；历史未知或自动拒绝未绑定资源时为 null，0 是有效等级。待审响应不包含最终审核员。
 
-**错误响应：** `401` 表示人员认证失败；`503` 表示 SQLite 或审核服务不可用，响应不会用空列表掩盖存储错误。
+**错误响应：** `401` 表示人员认证失败；`403` 表示没有注册中心管理权限；登录或管理员查询不可用返回 `503`；`503` 表示 SQLite 或审核服务不可用，响应不会用空列表掩盖存储错误。
 
 **请求示例：** 替换 `REPLACE_LOGIN_CODE`。
 
 ```bash
-curl -X GET 'http://127.0.0.1:23000/registry/api/deletion-review/list' \
+curl -X GET 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/deletion-review/list' \
   -H 'Authorization: Bearer REPLACE_LOGIN_CODE'
 ```
 
@@ -57,9 +58,9 @@ curl -X GET 'http://127.0.0.1:23000/registry/api/deletion-review/list' \
 
 ## 按审核员获取删除审核历史
 
-`GET /registry/api/deletion-review/history` 返回指定人员参与的删除审核历史：此人是删除审核员，或是该文件当初批准入库的注册中心审核员。记录须已完成本地处理，包含批准和拒绝。
+`GET /knowledge-accumulation/registry/api/deletion-review/history` 返回指定人员参与的删除审核历史：此人是删除审核员，或是该文件当初批准入库的注册中心审核员。记录须已完成本地处理，包含批准和拒绝。
 
-**认证：** `Authorization: Bearer <login_code>`。当前无角色分级，已登录人员可以查询其他审核员。
+**认证：** 此外必须具有注册中心当前平台（默认 `registry`）的管理权限，文件访问等级不能替代管理权限。  `Authorization: Bearer <access_token>`。当前无角色分级，已登录人员可以查询其他审核员。
 
 **请求参数：** query `reviewer` 可选，字符串长度 1 至 200，不能全为空白；省略时使用当前登录人员姓名，提供时精确匹配删除审核员或文件入库审核员。无 path 参数，无请求体。
 
@@ -73,6 +74,7 @@ curl -X GET 'http://127.0.0.1:23000/registry/api/deletion-review/list' \
     "source_platform": "contract-pheno",
     "source_id": "source-1",
     "passport": ["p1", "p2"],
+    "file_level": 3,
     "name": "设备采购合同",
     "abstract": "设备采购、交付及验收约定。",
     "uploader": "原文件上传人",
@@ -80,7 +82,7 @@ curl -X GET 'http://127.0.0.1:23000/registry/api/deletion-review/list' \
     "applicant_note": "申请删除",
     "requested_at": "2026-10-14T00:00:00Z",
     "status": "approved",
-    "reviewer": "审核员姓名",
+    "reviewer": "审核员标识",
     "reviewer_note": "## 同意删除",
     "reviewed_at": "2026-10-14T01:00:00Z",
     "result_message_id": "delete-result-001"
@@ -88,18 +90,18 @@ curl -X GET 'http://127.0.0.1:23000/registry/api/deletion-review/list' \
 ]
 ```
 
-申请字段含义见[待审列表](#获取待删除审核列表)；`status` 为 `approved` 或 `rejected`，表示本地处理结果。响应中的 `reviewer` 始终是实际作出删除决定的注册中心审核员，不替换为查询姓名；入库审核员查询时，两者可能不同，调用方不应再次按响应 reviewer 等于查询姓名过滤。批准删除后 `resource_id` 继续保留为历史关联，MySQL 中对应资源已移除；`name`、`abstract`、`uploader` 仍从删除记录返回，不能依赖原 resource_id 再读取正式文件目录。自动拒绝未绑定资源时，该字段为 null。
+申请字段含义见[待审列表](#获取待删除审核列表)；`status` 为 `approved` 或 `rejected`，表示本地处理结果。响应中的 `reviewer` 始终是实际作出删除决定的注册中心审核员，不替换为查询姓名；入库审核员查询时，两者可能不同，调用方不应再次按响应 reviewer 等于查询姓名过滤。批准删除后 `resource_id` 继续保留为历史关联，MySQL 中对应资源已移除；`name`、`abstract`、`uploader`、`file_level` 仍从删除记录返回，不能依赖原 resource_id 再读取正式文件目录。自动拒绝未绑定资源时，该字段为 null。
 
 `reviewer_note`、`reviewed_at` 的历史未知值保留 null；`result_message_id=null` 表示尚未记录反馈发布凭据或历史未知，不能据此断言中间件未收到消息。未完成本地处理、仍为 pending 的人工决定不进入历史。
 
-**错误响应：** `401` 表示人员认证失败；`422` 表示 reviewer 参数无效；`503` 表示 SQLite 查询或响应数据校验失败。
+**错误响应：** `401` 表示人员认证失败；`403` 表示没有注册中心管理权限；登录或管理员查询不可用返回 `503`；`422` 表示 reviewer 参数无效；`503` 表示 SQLite 查询或响应数据校验失败。
 
-**请求示例：** 替换免登码及审核员姓名。
+**请求示例：** 替换token及审核员标识。
 
 ```bash
-curl -X GET --get 'http://127.0.0.1:23000/registry/api/deletion-review/history' \
+curl -X GET --get 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/deletion-review/history' \
   -H 'Authorization: Bearer REPLACE_LOGIN_CODE' \
-  --data-urlencode 'reviewer=审核员姓名'
+  --data-urlencode 'reviewer=审核员标识'
 ```
 
 **行为与边界：** 只查询 SQLite；正式记录已删除或中间件不可用时仍可查看。筛选条件为删除审核人匹配，或通过 resource_id 关联的已批准入库记录审核人匹配；两个身份同时命中只返回一次。不按申请人或 source_reviewer 匹配，不按可能复用的 source_id 推测原文件身份，不分页。
@@ -110,9 +112,9 @@ curl -X GET --get 'http://127.0.0.1:23000/registry/api/deletion-review/history' 
 
 ## 确定删除最终审核结果
 
-`POST /registry/api/deletion-review/{review_id}/decision` 确定并执行删除审核，完成本地处理后发布中间件反馈。
+`POST /knowledge-accumulation/registry/api/deletion-review/{review_id}/decision` 确定并执行删除审核，完成本地处理后发布中间件反馈。
 
-**认证：** `Authorization: Bearer <login_code>`；审核员姓名从服务端登录身份取得，不接受请求体指定。
+**认证：** 此外必须具有注册中心当前平台（默认 `registry`）的管理权限，文件访问等级不能替代管理权限。  `Authorization: Bearer <access_token>`；审核员标识从服务端登录身份取得，不接受请求体指定。
 
 **请求参数：**
 
@@ -142,7 +144,7 @@ curl -X GET --get 'http://127.0.0.1:23000/registry/api/deletion-review/history' 
   "status": "approved",
   "approved": true,
   "resource_id": 123,
-  "reviewer": "审核员姓名",
+  "reviewer": "审核员标识",
   "reviewer_note": "## 同意删除",
   "reviewed_at": "2026-10-14T01:00:00Z",
   "result_message_id": "delete-result-001"
@@ -155,16 +157,18 @@ curl -X GET --get 'http://127.0.0.1:23000/registry/api/deletion-review/history' 
 
 | 状态码 | 触发条件 |
 | --- | --- |
-| `401` | 人员免登码缺失、无效或已过期。 |
+| `401` | 用户 token缺失、无效或已过期。 |
+| `403` | 已登录但没有当前平台管理权限，detail 为 `无权管理当前平台`。 |
+| `503` | 登录状态或管理员名单查询不可用，不能回退放行。 |
 | `404` | 审核记录不存在，或执行批准删除所需的正式原件、恢复保留文件缺失。 |
 | `409` | 审核已确定且本次决定、备注或审核员不同；旧结论不允许重审；正式目标缺失、身份或通行证变化。 |
 | `422` | ID、请求体类型、备注约束或额外字段无效。 |
 | `503` | 中间件会话未就绪，MySQL、SQLite、文件操作或反馈失败；本地可能已完成，不能据此当作未删除。 |
 
-**请求示例：** 替换免登码和路径中的审核 ID。
+**请求示例：** 替换token和路径中的审核 ID。
 
 ```bash
-curl -X POST 'http://127.0.0.1:23000/registry/api/deletion-review/7/decision' \
+curl -X POST 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/deletion-review/7/decision' \
   -H 'Authorization: Bearer REPLACE_LOGIN_CODE' \
   -H 'Content-Type: application/json' \
   -d '{"approved":true,"note":"## 同意删除"}'

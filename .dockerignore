@@ -30,3 +30,6 @@ description
 tests
 experiment
 AGENTS.md
+
+# 本地辅助脚本不参与镜像构建。
+scripts

@@ -2,6 +2,7 @@
 
 from typing import Literal
 
+from app.model.file_level import FileLevel
 from app.model.passport import Passports
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
@@ -26,6 +27,7 @@ class DeletionReviewApplicationResponse(BaseModel):
     source_platform: str = Field(description="申请来源平台代码。")
     source_id: str | None = Field(description="文件在来源平台中的 ID，历史未知时为 null。")
     passport: Passports | None = Field(description="申请删除时提交的原通行证数组，历史未知时为 null。")
+    file_level: FileLevel | None = Field(description="删除申请关联正式文件的等级快照，历史未知或未绑定资源时为 null。")
     name: str | None = Field(description="申请时的业务文件名称快照，与磁盘文件名不同；历史未知时为 null。")
     abstract: str | None = Field(description="申请时的文件摘要快照；历史未知时为 null。")
     uploader: str | None = Field(description="申请中记录的原文件上传人，与删除申请人不同；历史未知时为 null。")

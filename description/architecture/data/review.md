@@ -54,7 +54,7 @@ MySQL 正式资源不保存消息 ID、offset 或来源审核员。审核通过�
 
 ## 入库审核表
 
-`ingestion_reviews` 共 24 个字段：公共申请与审核字段，以及下列入库字段。待审核的新文件没有 MySQL 记录，因此这里保留完整文件快照；其中 `file_url` 指向将来正式资源使用的原文件。
+`ingestion_reviews` 共 25 个字段：公共申请与审核字段，以及下列入库字段。待审核的新文件没有 MySQL 记录，因此这里保留完整文件快照；其中 `file_url` 指向将来正式资源使用的原文件。
 
 | 字段 | 含义 |
 | --- | --- |
@@ -64,9 +64,10 @@ MySQL 正式资源不保存消息 ID、offset 或来源审核员。审核通过�
 | `abstract` | 文件摘要，最多 10000 字符，历史缺失时为空。 |
 | `embedding` | 摘要向量，JSON 数组文本，尚未生成时为空。 |
 | `passport_recommendations` | `{passport, reason}` 推荐列表，JSON 数组文本；NULL 表示未推荐，`[]` 表示已推荐但无候选。 |
+| `file_level` | INTEGER，可空且必须是整数。新批准时必填，决定预留后冻结；待审、拒绝及未知历史为 NULL。 |
 | `passport` | 人工最终通行证数组，JSON 文本；每项最多 512 字符，新批准时非空，拒绝为 `[]`，尚未决定和历史未知为 NULL。 |
 
-人工决定预留后，`reviewer`、`reviewer_note`、`reviewed_at` 已确定；存储处理完成前 `status` 仍为 `pending`。待审列表只查询 `status='pending' AND decision IS NULL`。存储完成后 `status=decision`，通过关联正式资源 ID；反馈发布完成后保存 `result_message_id`。通行证建议与最终通行证分别保存，不互相覆盖。
+人工决定预留后，`reviewer`、`reviewer_note`、`reviewed_at` 及批准时的 `file_level` 已确定；存储处理完成前 `status` 仍为 `pending`。待审列表只查询 `status='pending' AND decision IS NULL`。存储完成后 `status=decision`，通过关联正式资源 ID；反馈发布完成后保存 `result_message_id`。通行证建议与最终通行证分别保存，不互相覆盖。
 
 当前中间件[入库消息](../../../../../知识沉淀中间件服务/middleware-service/description/architecture/data/ingestion-request.md)没有独立 `applicant` 字段，来源提交人位于 `reviewer`。入库 DTO 兼容历史显式 `applicant`，缺失时映射上游 `reviewer`；新待审和自动拒绝记录据此保存申请人。注册中心最终审核人仍由人员登录或自动审核身份独立确定。
 
@@ -80,23 +81,24 @@ MySQL 正式资源不保存消息 ID、offset 或来源审核员。审核通过�
 
 ## 删除审核表
 
-`deletion_reviews` 共 22 个字段：公共申请与审核字段，以及下列删除字段。文件名称、摘要和原上传人保存为申请时的独立快照，资源删除后仍能展示；不复制向量或推荐列表。正式文件身份通过 `resource_id` 关联，来源身份保留用于请求校验和反馈。
+`deletion_reviews` 共 23 个字段：公共申请与审核字段，以及下列删除字段。文件名称、摘要和原上传人保存为申请时的独立快照，资源删除后仍能展示；不复制向量或推荐列表。正式文件身份通过 `resource_id` 关联，来源身份保留用于请求校验和反馈。
 
 | 字段 | 含义 |
 | --- | --- |
 | `name` | 删除消息中的业务文件名称快照，最多 200 字符；不是磁盘文件名，历史未知时为 NULL。 |
 | `abstract` | 删除消息中的文件摘要快照，最多 10000 字符，历史未知时为 NULL。 |
+| `file_level` | 从 MySQL 正式资源取得的文件等级快照，INTEGER 可空；历史未知或自动拒绝未绑定资源时为 NULL，0 为有效等级。 |
 | `uploader` | 删除消息中的原文件上传人，最多 200 字符，与删除申请人分开，历史未知时为 NULL。 |
 | `passport` | 子平台提交的已有文件通行证数组，JSON 文本，每项最多 512 字符；用于核对完整集合，不生成或推荐新的通行证。 |
 | `file_url` | 正式资源的原文件名，不带斜线，最多 146 字符；从 MySQL 资源记录取得，读取根目录为 RESOURCE_ROOT（默认 data/resource）。自动拒绝且未绑定资源时为空。 |
 
 中间件的[删除申请消息契约](../../../../../知识沉淀中间件服务/middleware-service/description/architecture/data/deletion-request.md)没有来源审核员，因此删除表不包含 `source_reviewer`。`applicant` 表示本次删除申请人，`applicant_note` 表示删除原因，`reviewer` 与 `reviewer_note` 表示注册中心的最终审核人员和意见。
 
-新删除申请不再上传文件。消费者按平台码与 source_id 定位正式资源，核对 passport 并检查原文件存在，保存 resource_id 与正式 file_url 后 ACK。原文件读取位置为 `{RESOURCE_ROOT}/{source_platform}/{file_url}`，待审核期间不复制、移动或删除。消息中的 name、abstract、uploader 在待审及自动拒绝分支首次写入本表，不用于磁盘路径或资源身份校验；重投不覆盖已保存快照。待审列表与审核历史直接从本表返回快照，不依赖 MySQL 资源是否存在。
+新删除申请不再上传文件。消费者按平台码与 source_id 定位正式资源，核对 passport 并检查原文件存在，保存 resource_id、正式 file_url 和 file_level 快照后 ACK。原文件读取位置为 `{RESOURCE_ROOT}/{source_platform}/{file_url}`，待审核期间不复制、移动或删除。消息中的 name、abstract、uploader 在待审及自动拒绝分支首次写入本表，不用于磁盘路径或资源身份校验；重投不覆盖已保存快照。待审列表与审核历史直接从本表返回快照，不依赖 MySQL 资源是否存在。
 
 资源不存在或通行证不符时，保存无资源绑定的 rejected 记录；同一资源已被另一条删除审核绑定时也拒绝新申请，保留旧记录。自动拒绝的 resource_id、file_url 为 NULL，保存申请、审核意见及反馈凭据后 ACK。详情见[删除申请接收服务](../../capability/application/deletion-consumer.md)。
 
-删除表的唯一索引保持原契约。SQLite schema 版本为 8，在通行证数组升级之上增加删除文件快照。旧记录的名称、摘要仅从资源唯一 ID、平台、源 ID 全部一致的已批准入库审核记录补齐，已有非空值不覆盖；未关联或无法可靠恢复时为 NULL。旧上传人保持 NULL，不用入库申请人代替。升级不访问 MySQL，不修改原决定、反馈凭据或审核时间；通行证转换规则见[通行证数组契约](passport.md)。历史 file_url 若曾保存删除附件，不能自动解释成正式文件；历史身份或正式引用不一致时停止消费等待核对，不猜测路径。
+删除表的唯一索引保持原契约。SQLite schema 版本为 10；版本 10 在删除表增加可空 `file_level`，仅从资源唯一 ID、平台、源 ID 全部一致的已批准入库记录恢复等级，已有非空快照不覆盖，无法恢复时保留 NULL；版本 8 引入删除文件快照，版本 9 在入库表增加可空 `file_level`，旧等级保持 NULL，不推测或自动改写原反馈。旧记录的名称、摘要仅从资源唯一 ID、平台、源 ID 全部一致的已批准入库审核记录补齐，已有非空值不覆盖；未关联或无法可靠恢复时为 NULL。旧上传人保持 NULL，不用入库申请人代替。升级不访问 MySQL，不修改原决定、反馈凭据或审核时间；通行证转换规则见[通行证数组契约](passport.md)。历史 file_url 若曾保存删除附件，不能自动解释成正式文件；历史身份或正式引用不一致时停止消费等待核对，不猜测路径。
 
 ---
 
@@ -117,3 +119,9 @@ MySQL 正式资源不保存消息 ID、offset 或来源审核员。审核通过�
 ## 文件目录与迁移
 
 审核数据库默认位于 `data/review-log/registry.db`。入库原文件在待审核期间存于 `data/review-log/tmp-file/ingestion/`，正式入库后转入 `data/resource/`；最终删除后的原文件转入 `data/review-log/tmp-file/deletion/` 保留，暂不自动清理。文件转移接口与旧目录迁移统一见[审核日志与文件存储](../../capability/infrastructure/review-file-storage.md)。
+
+---
+
+## 人工审核身份
+
+新人工决定中的注册中心审核人使用登录身份的 `userid`；历史姓名和固定自动审核员名称保持原值，不自动转换。字段仍为字符串，不增加员工外键，以保留员工移除后的审计记录。认证与兼容边界见[登录身份契约](authenticated-user.md)。

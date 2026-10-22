@@ -9,28 +9,39 @@
 - [项目首页](../README.md)：快速了解功能、开发启动、容器部署和测试入口。
 - [项目总览](project.md)：了解项目定位、基本职责、核心术语和总体业务流程。
 - [文档撰写风格手册](documentation.md)：了解文档归档、命名、排版与维护要求。
+- [版本管理范围](capability/application/runtime.md#版本管理范围)：了解部署文件、描述文档、目录占位与本地产物的交付边界。
 - [测试与实验产物规范](standard/experiment.md)：了解测试、实验和真实运行数据的目录边界。
 
 ---
 
 ## 基础设施
 
+- [员工头像代理与存储边界](capability/infrastructure/avatar.md)：了解头像转发、目标地址及端口配置、目录迁移与职责边界。
 - [审核日志与文件存储](capability/infrastructure/review-file-storage.md)：了解 SQLite 位置、入库暂存、正式文件晋升、删除保留和旧目录迁移。
 - [SQLite 审核数据基础设施](capability/infrastructure/sqlite.md)：了解运行数据位置、异步事务、初始化与生命周期。
 - [vLLM 多模态模型接入](capability/infrastructure/mllm.md)：了解模型配置、异步调用、PDF 页面 UUID 复用与错误恢复。
 - [MyVector 与 vLLM 向量检索试用](capability/infrastructure/myvector.md)：了解 LlamaIndex 模型接入、异步匹配和隔离验证。
 - [MySQL 与统一部署](capability/infrastructure/mysql.md)：了解数据库镜像、统一部署项目及当前实现边界。
+- [中央用户认证](capability/infrastructure/middleware-user.md)：了解直接 token 查询、续期及用户注册与维护职责边界。
 - [中间件注册与心跳](capability/infrastructure/middleware-session.md)：了解启动登录、会话续期、故障恢复及配置。
 
 ---
 
 ## 应用能力
 
+- [用户文件权限与平台管理员变更](capability/application/user-access.md)：增量更新文件等级和管理关系，先提交本地再即时同步中间件。
+
+- [已有员工资料手动刷新](capability/application/personnel-refresh.md)：配置钉钉应用，刷新姓名和部门，并持久重试姓名增量同步。
+
+- [登录与平台管理依赖](capability/application/authorization.md)：了解登录与当前平台管理员校验；管理员总表由知识后端发布。
+
 - [人工删除审核服务](capability/application/deletion-review.md)：了解最终删除、原件保留、拒绝与反馈恢复。
 - [人工入库审核服务](capability/application/ingestion-review.md)：了解最终决定、文件晋升、正式入库及反馈恢复。
 - [相似文件召回鲁棒性实验](capability/application/recall-robustness.md)：了解真实 PDF、摘要扰动、阈值与候选数量评估方法和适用边界。
 - [平台目录刷新服务](capability/application/platform-directory.md)：了解启动查询、周期更新、内存快照及存活状态的时效边界。
-- [人员系统](capability/application/personnel.md)：了解人员 YAML 加载、登录、免登码和审核身份依赖。
+- [向量化指令探索实验](capability/application/embedding-instruction-trial.md)：了解原文、任务指令、输入格式及分组验证方法。
+- [正式文件等级调整](capability/application/file-level-adjustment.md)：了解等级修改、中间件发布及 SQLite 独立审计日志。
+- [人员身份与职责](capability/application/personnel.md)：了解知识后端登录与 registry 权限、管理员维护边界。
 - [入库源文件身份拦截](capability/application/source-identity.md)：了解同平台、同源 ID 的待审核及正式资源阻断、消费重投与并发约束。
 - [待审核文件持久化](capability/application/pending-review.md)：了解原附件与 SQLite 完整待审核申请的保存顺序和重投保护。
 - [Python 运行环境与依赖](capability/application/dependencies.md)：了解基础依赖、开发环境及安装方式。
@@ -59,9 +70,10 @@
 
 ## 数据契约
 
+- [公司部门与员工契约](architecture/data/employee.md)：了解顶级部门、钉钉用户唯一 ID、平台权限 JSON 映射与子平台管理员关联。
 - [文件通行证数组契约](architecture/data/passport.md)：了解多通行证、跨组推荐、完整删除校验及已有数据库升级。
 - [平台目录内存契约](architecture/data/platform-directory.md)：了解公开平台字段、不可变快照与过期标记。
-- [审核人员定义](architecture/data/reviewer-user-definition.md)：了解人员名称、密钥约束和启动期不可变快照。
+- [登录身份契约](architecture/data/authenticated-user.md)：了解 userid、部门、权限与 token 会话边界。
 - [注册中心审核表契约](architecture/data/review.md)：了解完整入库暂存、轻量删除申请各自的字段、状态及资源关联约束。
 - [注册中心资源表契约](architecture/data/resource.md)：了解正式文件字段、入库备注、文件名、向量和通行证约束。
 
@@ -70,9 +82,9 @@
 ## 对外接口
 
 - [API 参考](api/readme.md)：查看完整接口目录与接入流程。
-- [人员登录 API](api/auth.md)：使用人员密钥取得免登码与审核人名称。
+- [当前身份 API](api/auth.md)：使用中央用户 token 查询当前身份。
 
-- [平台查看 API](api/platform.md)：查看排除自身的全部子平台及存活状态、下次计划同步时间。
+- [平台查看 API](api/platform.md)：查看包含注册中心自身的全部平台及存活状态、下次计划同步时间。
 
 - [正式文件目录 API](api/catalog.md)：获取所有正式文件的 ID、来源平台、入库文件名称、入库申请人、审核人、入库时间、摘要和最终通行证。
 

@@ -14,7 +14,7 @@ class ComparisonFile(BaseModel):
     abstract: str | None = Field(max_length=10000, description="文件摘要，未知时为 null。")
     pdf: PreparedPDF = Field(description="包含全部内存 PNG 页面及页面 UUID 的 PDF 渲染对象。")
     applicant: str | None = Field(default=None, max_length=200, description="文件元数据中 applicant 对应的人员名称，未知为 null；不能作为内容相同的证明。")
-    reviewer: str | None = Field(default=None, max_length=200, description="文件元数据中 reviewer 对应的人员名称，未知为 null；不能作为内容相同的证明。")
+    reviewer: str | None = Field(default=None, max_length=200, description="文件元数据中 reviewer 对应的人员标识（userid 或历史姓名），未知为 null；不能作为内容相同的证明。")
 
     @model_validator(mode="after")
     def validate_pages(self):

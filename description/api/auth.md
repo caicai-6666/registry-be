@@ -1,63 +1,44 @@
-# 人员登录 API
+# 当前用户身份 API
 
-仅凭审核人员密钥签发免登码。人员文件见[人员定义](../architecture/data/reviewer-user-definition.md)，缓存与配置见[人员系统](../capability/application/personnel.md)。
+注册中心验证中央用户会话及当前注册中心管理员资格。用户登录和 token 签发由 `knowledge-accumulation-be` 负责；各平台可以直接向中间件查询用户 token，无需调用知识后端的身份验证接口。
 
 ## 接口目录
 
 | 接口 | 方法 | 完整路径 |
 | --- | --- | --- |
-| [使用密钥登录](#使用密钥登录) | `POST` | `/registry/api/auth/login` |
+| [获取当前身份](#获取当前身份) | `GET` | `/knowledge-accumulation/registry/api/auth/me` |
 
 ---
 
-## 使用密钥登录
+## 获取当前身份
 
-`POST /registry/api/auth/login`，仅凭密钥识别审核人并签发免登码。
+`GET /knowledge-accumulation/registry/api/auth/me`，确认已登录的注册中心管理员身份；普通用户返回403。
 
-### 认证方式
+**认证方式：** header `Authorization: Bearer <access_token>`，使用知识后端签发的用户 token。与 registry 调用中间件时使用的平台 token 不同。
 
-本接口不要求 Bearer 认证，凭据在 JSON 请求体中提交。
+**请求参数：** 无 path、query 参数或请求体。不能通过 userid 指定当前用户。
 
-### 请求参数
-
-媒体类型为 `application/json`，没有 path 或 query 参数。
-
-| 位置 | 参数 | 类型 | 必填 | 约束 |
-| --- | --- | --- | --- | --- |
-| body | `secret_key` | 字符串 | 是 | 非空，与人员配置精确匹配；请求禁止额外字段。 |
-
-### 成功响应
-
-`200 OK`，媒体类型 `application/json`：
+**成功响应：** `200 application/json`，携带 `Cache-Control: no-store`：
 
 ```json
-{
-  "login_code": "随机免登码",
-  "user_name": "注册中心审核员"
-}
+{"userid":"user-001","username":"审核员甲"}
 ```
 
-`user_name` 来自服务端人员快照；`login_code` 为当前进程签发的凭据。
+只返回 `userid` 和 `username`，均来自中间件 `POST /middleware-service/api/user/login-cache`；不返回部门、头像、文件权限或管理平台列表。每次验证中央登录并续期后，再确认 registry 管理权限；不查询本地员工表，开发模拟身份也使用中央用户名。完整用户资料由知识后端 `/knowledge-accumulation/api/auth/me` 提供。字段见[身份契约](../architecture/data/authenticated-user.md)。
 
-### 错误响应
+**错误响应：**
 
-| 状态码 | 触发条件 | 响应 |
-| --- | --- | --- |
-| `401` | 密钥未匹配人员，包括全空白密钥 | `{"detail":"审核用户密钥无效"}` |
-| `422` | 缺少字段、密钥为空或类型错误、额外字段、非法 JSON | `detail` 错误列表，仅包含 `type`、`loc`、`msg`，不回显输入。 |
+| 状态码 | 条件 |
+| --- | --- |
+| `401` | Bearer 头缺失或格式错误，或中央确认 token 未知、过期、已被新登录替换。携带 `WWW-Authenticate: Bearer`。 |
+| `403` | 用户登录有效但不是注册中心管理员。 |
+| `503` | registry 平台会话未就绪、中央用户或管理员查询网络/响应异常。不会回退到本地凭据。 |
 
-### 请求示例
-
-替换本地 URL 和密钥；直接文件启动默认端口为 `23000`，容器内部为 `8000`。
+**请求示例：**
 
 ```bash
-curl -X POST http://127.0.0.1:23000/registry/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"secret_key":"替换为本地人员密钥"}'
+curl 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/auth/me' \
+  -H 'Authorization: Bearer replace-with-user-access-token'
 ```
 
-### 行为与边界
-
-免登码默认有效期 `3600` 秒，可通过 `AUTH_LOGIN_CODE_TTL_SECONDS` 修改。后续受保护路由需要 `Authorization: Bearer <login_code>`；成功解析后刷新有效期，已过期的码不会复活。认证依赖对缺失、格式错误、无效或过期凭据返回 `401`，并设置 `WWW-Authenticate: Bearer`。
-
-重复登录不撤销旧码；应用重启后旧码全部失效。缓存不跨进程共享，当前没有登出、撤销或独立续期接口。[入库审核](ingestion-review.md)与[删除审核](deletion-review.md)均使用该身份确定最终审核人；OpenAPI 与 Swagger 入口仍可直接访问。
+**行为与边界：** 有效查询由中间件滑动续期；本接口不创建、恢复或签发登录，不调用 `PUT /user/login-cache`。registry 重启不会自行撤销用户 token，最终有效性由中央决定。旧 `POST /knowledge-accumulation/registry/api/auth/login` 已移除，返回 404；开发固定凭据与钉钉 code 均应提交给知识后端的登录入口。中央请求与错误处理见[中央用户认证](../capability/infrastructure/middleware-user.md)。

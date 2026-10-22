@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS ingestion_reviews (
     request_offset TEXT NULL CHECK(request_offset IS NULL OR (length(request_offset) BETWEEN 1 AND 20 AND request_offset NOT GLOB '*[^0-9]*')),
     result_message_id TEXT NULL CHECK(result_message_id IS NULL OR length(result_message_id) BETWEEN 1 AND 128),
     decision TEXT NULL CHECK(decision IS NULL OR decision IN ('approved','rejected')),
+    file_level INTEGER NULL CHECK(file_level IS NULL OR typeof(file_level)='integer'),
     passport TEXT NULL CHECK(passport IS NULL OR CASE WHEN json_valid(passport) THEN json_type(passport)='array' ELSE 0 END),
     source_platform TEXT NOT NULL CHECK(length(source_platform) BETWEEN 1 AND 128),
     source_id TEXT NULL CHECK(source_id IS NULL OR length(source_id) BETWEEN 1 AND 128),
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS deletion_reviews (
     file_url TEXT NULL CHECK(file_url IS NULL OR length(file_url) BETWEEN 1 AND 146),
     name TEXT NULL CHECK(name IS NULL OR length(name) BETWEEN 1 AND 200),
     abstract TEXT NULL CHECK(abstract IS NULL OR length(abstract) BETWEEN 1 AND 10000),
+    file_level INTEGER NULL CHECK(file_level IS NULL OR typeof(file_level)='integer'),
     uploader TEXT NULL CHECK(uploader IS NULL OR length(uploader) BETWEEN 1 AND 200),
     applicant TEXT NULL CHECK(applicant IS NULL OR length(applicant) BETWEEN 1 AND 200),
     applicant_note TEXT NOT NULL DEFAULT '' CHECK(length(applicant_note) <= 10000),
@@ -62,5 +64,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_deletion_reviews_resource ON deletion_revie
 CREATE INDEX IF NOT EXISTS idx_deletion_reviews_source ON deletion_reviews(source_platform,source_id);
 CREATE INDEX IF NOT EXISTS idx_deletion_reviews_status_time ON deletion_reviews(status,requested_at);
 
-PRAGMA user_version = 8;
+PRAGMA user_version = 10;
 COMMIT;

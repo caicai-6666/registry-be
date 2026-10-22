@@ -72,7 +72,7 @@ class IngestionReviewService:
                     # 决定未保存时先确认原件有效；缺失附件不能产生无法执行的新批准决定。
                     await self.files.read_ingestion(row["source_platform"], row["file_url"])
             try:
-                await self.reviews.reserve_decision(review_id, decision=decision, passport=passport, reviewer=reviewer, note=body.note)
+                await self.reviews.reserve_decision(review_id, decision=decision, passport=passport, reviewer=reviewer, note=body.note, file_level=body.file_level)
             except ValueError as error:
                 raise ReviewConflict(str(error)) from None
             return await self._resume(review_id)
@@ -82,6 +82,8 @@ class IngestionReviewService:
         if row["decision"] is None:
             raise ReviewConflict("人工审核决定尚未确定")
         if row["result_message_id"] is None:
+            if row["decision"] == "approved" and row["file_level"] is None:
+                raise ReviewConflict("历史批准记录缺少文件等级，需先明确补齐后才能恢复")
             self._token()
             if row["status"] == "pending":
                 if row["decision"] == "approved":
@@ -101,7 +103,7 @@ class IngestionReviewService:
             row = await self._review(review_id)
         return IngestionReviewResultResponse.model_validate({
             "id": row["id"], "status": row["status"], "resource_id": int(row["resource_id"]) if row["resource_id"] else None,
-            "passport": row["passport"], "reviewer": row["reviewer"], "reviewer_note": row["reviewer_note"],
+            "passport": row["passport"], "file_level": row["file_level"], "reviewer": row["reviewer"], "reviewer_note": row["reviewer_note"],
             "reviewed_at": row["reviewed_at"], "result_message_id": row["result_message_id"],
         })
 
@@ -114,6 +116,7 @@ class IngestionReviewService:
                     result_id = await self.middleware.publish_ingestion_result(
                         request_id=row["message_id"], target_platform_code=row["source_platform"], token=token,
                         note=row["reviewer_note"], reviewer=row["reviewer"], passport=row["passport"],
+                        file_level=row["file_level"] if row["decision"] == "approved" else 0,
                     )
                 await self.reviews.mark_decision_published(row["id"], result_id)
             except httpx.HTTPStatusError as error:

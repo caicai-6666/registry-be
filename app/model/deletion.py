@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+from app.model.file_level import FileLevel
 from app.model.passport import Passports, normalize_passports
 from typing import Literal
 
@@ -68,3 +69,4 @@ class DeletionResource(BaseModel):
     source_id: str = Field(min_length=1, max_length=128)
     file_url: str = Field(pattern=r"^[A-Za-z0-9_-]{1,128}\.[A-Za-z0-9]{1,16}$")
     passport: Passports | None = None
+    file_level: FileLevel | None = None

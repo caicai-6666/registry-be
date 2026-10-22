@@ -2,21 +2,25 @@
 
 import asyncio
 import hashlib
+from collections import OrderedDict
 
 from llama_index.core.schema import TextNode, NodeRelationship, RelatedNodeInfo
 from llama_index.core.vector_stores.types import MetadataFilter, MetadataFilters, VectorStoreQuery
 
 from app.infrastructure.myvector import MyVectorStore
 from app.repository.resource import MySQLResourceRepository
-from app.service.embedding import validate_vector
+from app.service.embedding import EmbeddingService, SUMMARY_EMBEDDING_INSTRUCTION, validate_vector
 from app.model.resource import ResourceCandidate
 
 
 class ReadyResourceSearch:
-    def __init__(self, repository: MySQLResourceRepository, *, model_name: str, dimensions: int):
+    def __init__(self, repository: MySQLResourceRepository, *, model_name: str, dimensions: int,
+                 embeddings: EmbeddingService | None = None):
         self.repository = repository
         self.model_name = model_name
         self.dimensions = dimensions
+        self.embeddings = embeddings
+        self._abstract_vectors: OrderedDict[str, list[float]] = OrderedDict()
         self._store: MyVectorStore | None = None
         self._lock = asyncio.Lock()
 
@@ -39,6 +43,8 @@ class ReadyResourceSearch:
                 if self._store is not None:
                     await self._clear_snapshot(source_platform)
                 return []
+            if self.embeddings is not None:
+                rows = await self._encode_abstracts(rows)
             # 业务表是权威来源，索引快照不能决定审核状态。校验完全部向量才替换快照。
             for row in rows:
                 validate_vector(row["embedding"], self.dimensions)
@@ -72,6 +78,37 @@ class ReadyResourceSearch:
                      "passport": node.metadata.get("passport")}
                     for node, similarity in zip(result.nodes or [], result.similarities or [])
                     if (similarity > min_similarity if source_platform is None else similarity >= min_similarity)]
+
+    async def _encode_abstracts(self, rows: list[dict]) -> list[dict]:
+        """旧库没有指令来源标识，按摘要重新编码后再建索引，避免混比新旧向量。"""
+        keys = []
+        missing = {}
+        for row in rows:
+            abstract = row["abstract"]
+            if not isinstance(abstract, str) or not abstract.strip():
+                raise ValueError("正式文件缺少摘要，无法按当前指令生成检索向量")
+            key = hashlib.sha256((self.model_name + "\0" + str(self.dimensions) + "\0" +
+                                  SUMMARY_EMBEDDING_INSTRUCTION + "\0" + abstract).encode("utf-8")).hexdigest()
+            keys.append(key)
+            if key not in self._abstract_vectors:
+                missing[key] = abstract
+        fresh = {}
+        if missing:
+            vectors = await self.embeddings.embed_texts(list(missing.values()))
+            if len(vectors) != len(missing):
+                raise ValueError("摘要向量返回数量与待编码文件不一致")
+            for key, vector in zip(missing, vectors, strict=True):
+                validate_vector(vector, self.dimensions)
+                fresh[key] = vector
+        # 全部成功才使用新结果；仅缓存内存向量，不改写 MySQL 或历史审核快照。
+        result = [{**row, "embedding": fresh[key] if key in fresh else self._abstract_vectors[key]}
+                  for row, key in zip(rows, keys, strict=True)]
+        for key, row in zip(keys, result, strict=True):
+            self._abstract_vectors[key] = row["embedding"]
+            self._abstract_vectors.move_to_end(key)
+            if len(self._abstract_vectors) > 10000:
+                self._abstract_vectors.popitem(last=False)
+        return result
 
     async def _clear_snapshot(self, source_platform: str | None) -> None:
         if source_platform is None:

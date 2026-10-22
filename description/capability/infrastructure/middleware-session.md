@@ -43,8 +43,10 @@
 
 1. 后台发送 `POST /middleware-service/api/platform/login`，JSON 请求体仅包含 `platform_code` 和 `secret`。
 2. 成功响应必须包含非空令牌、`token_type=bearer`、匹配的平台代号、正整数有效期和小于有效期的心跳间隔。
-3. 按服务端返回的间隔发送 `POST /middleware-service/api/platform/heartbeat`，仅携带 `Authorization: Bearer <access_token>`，不发送请求体。
+3. 按服务端返回的间隔发送 `POST /middleware-service/api/platform/heartbeat`，携带 `Authorization: Bearer <access_token>`，不发送请求体或用户数据。
 4. 每次心跳成功后更新有效期与下次间隔，令牌保持不变。
+
+管理员总表发布、用户全表注册和登录写入均由知识后端负责；registry 不启动全表同步。[中央用户查询](middleware-user.md)使用用户 token，平台心跳不参与用户资料、登录状态或 TTL 同步。
 
 客户端不跟随重定向、不使用环境代理。成功响应必须为 200，非法响应不会被当作已注册或已续期。有效期采用请求开始时的单调时间保守估算，网络耗时不计入额外有效期。
 
@@ -78,4 +80,4 @@ python -m unittest discover -s tests -v
 
 测试覆盖无请求体心跳、服务端间隔更新、409 重试、401 重登、断线和临时故障、过期边界、总超时、关闭取消、配置优先级、响应校验和敏感日志边界。
 
-本模块维护平台登录与心跳，[入库申请接收服务](../application/ingestion-consumer.md)已复用其令牌拉取并确认申请。审核结果发布将在后续业务功能中接入。Web 镜像健康检查只表示 HTTP 入口可响应，不代表中间件会话有效。
+本模块维护平台登录与心跳，[入库申请接收服务](../application/ingestion-consumer.md)已复用其令牌拉取并确认申请。人工审核与自动拒绝已复用该令牌发布审核结果。Web 镜像健康检查只表示 HTTP 入口可响应，不代表中间件会话有效。

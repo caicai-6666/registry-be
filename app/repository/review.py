@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from app.agent.passport_recommendation import PassportRecommendationInput, PassportRecommendationResult
 from app.infrastructure.sqlite import SQLiteDatabase
+from app.model.file_level import FILE_LEVEL
 from app.model.passport import encode_passports, decode_passports, passport_record
 from app.model.resource import ActiveSourceConflict, IngestionDelivery, StoredFile, StoredResource
 
@@ -170,7 +171,7 @@ class SQLiteReviewRepository:
         async with self.database.connection() as connection:
             async with connection.execute(
                 "SELECT id,source_platform,source_id,name,abstract,COALESCE(applicant,source_reviewer) AS applicant,applicant_note,"
-                "requested_at,passport_recommendations,resource_id,status,passport,reviewer,reviewer_note,"
+                "requested_at,passport_recommendations,resource_id,status,passport,file_level,reviewer,reviewer_note,"
                 "reviewed_at,result_message_id FROM ingestion_reviews "
                 "WHERE reviewer=? AND status IN ('approved','rejected') ORDER BY reviewed_at DESC,id DESC",
                 (reviewer,),
@@ -181,27 +182,31 @@ class SQLiteReviewRepository:
                  "passport_recommendations": json.loads(row["passport_recommendations"])
                  if row["passport_recommendations"] is not None else None} for row in rows]
 
-    async def reserve_decision(self, review_id: int, *, decision: str, passport: list[str], reviewer: str, note: str) -> dict:
-        """以 SQLite 写事务确定唯一人工决定；已预留决定不能被其他审核意见覆盖。"""
+    async def reserve_decision(self, review_id: int, *, decision: str, passport: list[str], reviewer: str, note: str, file_level: int | None = None) -> dict:
+        """以 SQLite 写事务确定唯一人工决定，等级与通行证一起冻结，恢复时不能改写。"""
+        if decision == 'approved':
+            FILE_LEVEL.validate_python(file_level)
+        elif file_level is not None:
+            raise ValueError('拒绝入库不能设置文件等级')
         async with self.database.transaction() as connection:
             async with connection.execute("SELECT * FROM ingestion_reviews WHERE id=?", (review_id,)) as cursor:
                 row = await cursor.fetchone()
             if row is None:
                 raise LookupError("入库审核申请不存在")
             if row["decision"] is not None:
-                if (row["decision"], decode_passports(row["passport"]), row["reviewer"], row["reviewer_note"]) != (decision, passport, reviewer, note):
+                if (row["decision"], decode_passports(row["passport"]), row["reviewer"], row["reviewer_note"], row["file_level"]) != (decision, passport, reviewer, note, file_level):
                     raise ValueError("入库审核决定已确定，不能更改")
                 return passport_record(row)
             if row["status"] != "pending":
                 raise ValueError("该申请已经完成审核")
             now = utc_text(datetime.now(timezone.utc))
             await connection.execute(
-                "UPDATE ingestion_reviews SET decision=?,passport=?,reviewer=?,reviewer_note=?,reviewed_at=?,updated_at=?,"
+                "UPDATE ingestion_reviews SET decision=?,passport=?,file_level=?,reviewer=?,reviewer_note=?,reviewed_at=?,updated_at=?,"
                 "applicant=COALESCE(applicant,source_reviewer) WHERE id=?",
-                (decision, encode_passports(passport), reviewer, note, now, now, review_id),
+                (decision, encode_passports(passport), file_level, reviewer, note, now, now, review_id),
             )
             return {**dict(row), "applicant": row["applicant"] if row["applicant"] is not None else row["source_reviewer"],
-                    "decision": decision, "passport": passport, "reviewer": reviewer,
+                    "decision": decision, "passport": passport, "file_level": file_level, "reviewer": reviewer,
                     "reviewer_note": note, "reviewed_at": now, "updated_at": now}
 
     async def complete_decision(self, review_id: int, *, resource_id: int | None) -> dict:
@@ -225,10 +230,10 @@ class SQLiteReviewRepository:
         """正式身份校验失败且未执行文件晋升时释放预留，让审核人仍可拒绝该申请。"""
         async with self.database.transaction() as connection:
             await connection.execute(
-                "UPDATE ingestion_reviews SET decision=NULL,passport=NULL,reviewer=NULL,reviewer_note=NULL,"
+                "UPDATE ingestion_reviews SET decision=NULL,passport=NULL,file_level=NULL,reviewer=NULL,reviewer_note=NULL,"
                 "reviewed_at=NULL,updated_at=? WHERE id=? AND status='pending' AND resource_id IS NULL "
-                "AND decision='approved' AND passport=? AND reviewer=? AND reviewer_note=?",
-                (utc_text(datetime.now(timezone.utc)), review["id"], encode_passports(review["passport"]), review["reviewer"], review["reviewer_note"]),
+                "AND decision='approved' AND passport=? AND reviewer=? AND reviewer_note=? AND file_level IS ?",
+                (utc_text(datetime.now(timezone.utc)), review["id"], encode_passports(review["passport"]), review["reviewer"], review["reviewer_note"], review["file_level"]),
             )
 
     async def mark_decision_published(self, review_id: int, result_message_id: str) -> None:

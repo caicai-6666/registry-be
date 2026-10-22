@@ -38,7 +38,6 @@ conda create -n registry-be python=3.12 pip
 | `python-dotenv` | 读取项目根目录的环境配置。 |
 | `pydantic` | 校验中间件配置和会话响应，隐藏敏感字段。 |
 | `aiosqlite` | 异步访问 SQLite 数据库。 |
-| `PyYAML` | 严格加载审核人员 YAML，禁止不安全对象构造和重复键。 |
 | `llama-index` | 提供知识索引及相关集成能力。 |
 | `llama-index-embeddings-openai-like` | 使用 LlamaIndex 异步调用 vLLM 的 OpenAI 兼容 embedding 接口。 |
 | `langgraph` | 编排具有状态的智能体工作流。 |
@@ -50,7 +49,7 @@ SQLite 引擎通过 Python 标准库 `sqlite3` 使用，无须另行安装名为
 
 ## 使用边界
 
-已提供可运行的 FastAPI 入口，启动与容器配置见 [环境配置与容器运行](runtime.md)。[入库申请接收服务](ingestion-consumer.md)将待审核申请暂存 SQLite，MySQL 保存审核通过的正式资源。[人员系统](personnel.md)提供密钥登录与审核身份依赖，[人工入库审核服务](ingestion-review.md)已接入这些身份。
+已提供可运行的 FastAPI 入口，启动与容器配置见 [环境配置与容器运行](runtime.md)。[入库申请接收服务](ingestion-consumer.md)将待审核申请暂存 SQLite，MySQL 保存审核通过的正式资源。[人员系统](personnel.md)提供开发者 token、钉钉 H5 免登与审核身份依赖，[人工入库审核服务](ingestion-review.md)已接入这些身份。
 
 应用生命周期已接入[中间件注册与心跳](../infrastructure/middleware-session.md)，启动时登录并在后台续期，关闭时释放资源。
 

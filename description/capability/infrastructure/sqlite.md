@@ -52,7 +52,7 @@ async with SQLiteDatabase(load_sqlite_settings()) as database:
 
 ## 初始化与迁移边界
 
-建表执行来源为 [sqlite_schema.sql](../../../app/infrastructure/sqlite_schema.sql)。当前 schema 版本为 `PRAGMA user_version=8`。空版本数据库在一个事务中创建审核表与索引；重复初始化不清空数据。版本 1 在事务中补充消费 offset、反馈消息 ID 及资源唯一关联索引；已有重复资源关联时升级失败并回滚，不删除记录。版本 2 升级时补充入库文件快照、摘要向量、推荐列表和 pending 源身份唯一索引；不会自动读取或修改 MySQL。版本 3 升级时为删除表补充通行证和正式原文件名，移除不属于删除消息的来源审核员字段。旧来源审核员含非空历史值时明确中止，事务回滚，不静默丢弃数据。版本 4 升级时为入库表补充 `decision` 与最终 `passport`，既有记录默认 NULL，不重新发布历史结果。版本 5 升级时为删除表补充 `decision`，既有结论保持 NULL，保留全部历史且不自动重新发布。版本 6 升级时在一个事务中重建两表，将旧通行证转为 JSON 数组文本并放宽旧整列长度约束，保留原值、记录、索引和自增进度；值与升级规则见[通行证数组契约](../../architecture/data/passport.md)。版本 7 升级时在一个事务中为删除表增加 `name`、`abstract`、`uploader` 快照列，仅按资源唯一 ID、平台及源 ID 一致的已批准 SQLite 入库记录补齐旧名称和摘要；旧上传人未知则保持 NULL，不访问 MySQL，也不重置决定、反馈或审核时间。未知版本明确报错，不自动降级。后续结构修改需要相应版本迁移，不能仅修改 `CREATE TABLE IF NOT EXISTS` 期望更新旧表。
+建表执行来源为 [sqlite_schema.sql](../../../app/infrastructure/sqlite_schema.sql)。当前 schema 版本为 `PRAGMA user_version=10`。空版本数据库在一个事务中创建审核表与索引；重复初始化不清空数据。版本 1 在事务中补充消费 offset、反馈消息 ID 及资源唯一关联索引；已有重复资源关联时升级失败并回滚，不删除记录。版本 2 升级时补充入库文件快照、摘要向量、推荐列表和 pending 源身份唯一索引；不会自动读取或修改 MySQL。版本 3 升级时为删除表补充通行证和正式原文件名，移除不属于删除消息的来源审核员字段。旧来源审核员含非空历史值时明确中止，事务回滚，不静默丢弃数据。版本 4 升级时为入库表补充 `decision` 与最终 `passport`，既有记录默认 NULL，不重新发布历史结果。版本 5 升级时为删除表补充 `decision`，既有结论保持 NULL，保留全部历史且不自动重新发布。版本 6 升级时在一个事务中重建两表，将旧通行证转为 JSON 数组文本并放宽旧整列长度约束，保留原值、记录、索引和自增进度；值与升级规则见[通行证数组契约](../../architecture/data/passport.md)。版本 7 升级时在一个事务中为删除表增加 `name`、`abstract`、`uploader` 快照列，仅按资源唯一 ID、平台及源 ID 一致的已批准 SQLite 入库记录补齐旧名称和摘要；旧上传人未知则保持 NULL，不访问 MySQL，也不重置决定、反馈或审核时间。版本 8 升级时为入库表增加 `file_level INTEGER NULL`，检查非空值的 SQLite 类型必须为 integer；历史记录保留 NULL，不猜测等级，不改动原审核决定或反馈。版本 9 升级时为删除表增加 `file_level INTEGER NULL`，仅从资源唯一 ID、平台、源 ID 全部一致的已批准入库记录恢复等级；无法恢复时保持 NULL，已有非空快照不覆盖。升级不访问 MySQL、不重置审核结果，保留辅助同步表。未知版本明确报错，不自动降级。后续结构修改需要相应版本迁移，不能仅修改 `CREATE TABLE IF NOT EXISTS` 期望更新旧表。
 
 应用启动初始化 SQLite，不自动修改 MySQL。`SQLiteReviewRepository` 保存入库审核申请、自动拒绝意见和已发布反馈凭据；`SQLiteDeletionReviewRepository` 保存无附件删除申请、正式文件引用、人工决定和反馈发布凭据；消费 ACK 前必须保存完整待审核申请，当前申请不提前写入 MySQL。MySQL 仅维护最终版本初始化定义，不再提供旧审核字段的迁移工具；边界见[资源表说明](../../architecture/data/resource.md#初始化与版本边界)。
 
@@ -67,3 +67,6 @@ python -m unittest discover -s tests -p 'test_sqlite.py'
 ```
 
 测试数据库全部位于 `tests/tmp/`，结束后清理；覆盖重复初始化、运行参数、两张审核表、提交与回滚、取消回滚、并发事务隔离、消息唯一性、状态与备注约束、可空资源关联、完整 uint64 资源 ID、版本拒绝以及应用启停。
+
+
+文件等级调整另建 [file_level_adjustments 独立审计表](../../architecture/data/file-level-adjustment.md)，由仓库在应用启动时幂等初始化，不改变审核 schema 版本；记录调整前后等级、操作人及中间件发布确认，保存在同一持久化数据库。

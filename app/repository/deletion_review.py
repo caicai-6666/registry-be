@@ -26,7 +26,7 @@ class SQLiteDeletionReviewRepository:
     async def list_pending(self) -> list[dict]:
         async with self.database.connection() as connection:
             async with connection.execute(
-                "SELECT id,resource_id,source_platform,source_id,passport,name,abstract,uploader,applicant,applicant_note,requested_at "
+                "SELECT id,resource_id,source_platform,source_id,passport,file_level,name,abstract,uploader,applicant,applicant_note,requested_at "
                 "FROM deletion_reviews WHERE status='pending' AND decision IS NULL ORDER BY id",
             ) as cursor:
                 return [{**passport_record(row), "resource_id": int(row["resource_id"]) if row["resource_id"] else None}
@@ -37,7 +37,7 @@ class SQLiteDeletionReviewRepository:
         # 使用 EXISTS，两个身份同时命中时也只返回一次；不按申请人或可复用的源 ID 扩大范围。
         async with self.database.connection() as connection:
             async with connection.execute(
-                "SELECT d.id,d.resource_id,d.source_platform,d.source_id,d.passport,d.name,d.abstract,d.uploader,"
+                "SELECT d.id,d.resource_id,d.source_platform,d.source_id,d.passport,d.file_level,d.name,d.abstract,d.uploader,"
                 "d.applicant,d.applicant_note,d.requested_at,"
                 "d.status,d.reviewer,d.reviewer_note,d.reviewed_at,d.result_message_id FROM deletion_reviews AS d "
                 "WHERE d.status IN ('approved','rejected') AND (d.reviewer=? OR EXISTS ("
@@ -149,9 +149,9 @@ class SQLiteDeletionReviewRepository:
             # 业务描述取申请消息的首次快照，不作为路径或资源身份，也不随重投覆盖。
             async with connection.execute(
                 "INSERT INTO deletion_reviews (message_id,resource_id,request_offset,source_platform,source_id,"
-                "passport,file_url,name,abstract,uploader,applicant,applicant_note,requested_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "passport,file_url,file_level,name,abstract,uploader,applicant,applicant_note,requested_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (message.message_id, str(resource.resource_id), str(delivery.offset), message.platform_code,
-                 message.source_id, encode_passports(message.passport), resource.file_url,
+                 message.source_id, encode_passports(message.passport), resource.file_url, resource.file_level,
                  message.name, message.abstract, message.uploader, message.applicant, message.note,
                  utc_text(message.created_at)),
             ) as cursor:

@@ -9,15 +9,26 @@ if __name__ == "__main__" and not __package__:
 
 from contextlib import AsyncExitStack, asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app.config.auth import AuthSettings, load_auth_settings
-from app.user import load_reviewer_user_catalog
-from app.service.auth import AuthService, LoginCodeCache
+from app.config.api import API_PREFIX
+from app.config.knowledge import KnowledgeSettings, load_knowledge_settings
+from app.config.dingtalk import DingTalkSettings, load_dingtalk_settings
+from app.infrastructure.dingtalk import DingTalkClient
+from app.repository.personnel_sync import SQLitePersonnelSyncRepository
+from app.service.personnel_refresh import PersonnelRefreshService
+from app.repository.user_access_sync import SQLiteUserAccessSyncRepository
+from app.service.user_access import UserAccessService
+from app.infrastructure.knowledge import KnowledgeClient
+from app.repository.employee import MySQLEmployeeRepository
+from app.service.auth import AuthService
 from app.router.auth import router as auth_router
+from app.router.user import router as user_router
 from app.router.platform import router as platform_router
+from app.repository.file_level_adjustment import SQLiteFileLevelAdjustmentRepository
+from app.service.file_level_adjustment import FileLevelAdjustmentService
 from app.router.catalog import router as catalog_router
 from app.router.resource import router as resource_router
 from app.router.ingestion_review import router as ingestion_review_router
@@ -49,6 +60,9 @@ from app.service.pending_review import PendingReviewService
 from app.service.resource_candidates import ReadyResourceSearch
 from app.service.resource_pdf import ResourcePDFService
 from app.service.middleware_session import MiddlewareSessionService
+from app.config.authorization import AuthorizationSettings, load_authorization_settings
+from app.router.dependency import require_platform_admin
+from app.service.platform_admin import PlatformAdminService
 from app.service.platform_directory import PlatformDirectoryService
 from app.service.review_files import ReviewFileService
 from app.service.ingestion_review import IngestionReviewService
@@ -61,21 +75,17 @@ def create_app(
     *, middleware_client: MiddlewareClient | None = None,
     ingestion_settings: IngestionSettings | None = None,
     sqlite_settings: SQLiteSettings | None = None,
-    auth_settings: AuthSettings | None = None,
+    authorization_settings: AuthorizationSettings | None = None,
     platform_directory_settings: PlatformDirectorySettings | None = None,
     deletion_settings: DeletionSettings | None = None,
+    knowledge_settings: KnowledgeSettings | None = None,
+    dingtalk_settings: DingTalkSettings | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        # 人员配置必须完整有效；在数据库初始化和中间件连接前先验证。
-        auth = auth_settings or load_auth_settings()
-        catalog = load_reviewer_user_catalog(auth.reviewer_user_file)
-        application.state.reviewer_user_catalog = catalog
-        application.state.auth_service = AuthService(
-            reviewer_users=catalog,
-            login_code_cache=LoginCodeCache(ttl_seconds=auth.login_code_ttl_seconds),
-        )
+        # 登录由知识后端建立；registry 在所有环境中直接查询中央用户 token。
         middleware = settings or load_middleware_settings()
+        authorization = authorization_settings or load_authorization_settings()
         application.state.middleware_platform_code = middleware.platform_code
         service = MiddlewareSessionService(middleware, client=middleware_client)
         application.state.middleware_session_service = service
@@ -88,37 +98,69 @@ def create_app(
         application.state.resource_repository = None
         application.state.ingestion_review_service = None
         application.state.deletion_review_service = None
+        application.state.platform_admin_service = None
+        application.state.knowledge_client = None
+        application.state.personnel_refresh_service = None
+        application.state.user_access_service = None
+        application.state.file_level_adjustment_service = None
         # 后注册的依赖先关闭；启动中途失败也按同样顺序清理已创建的资源。
         async with AsyncExitStack() as resources:
+            knowledge = knowledge_settings or load_knowledge_settings()
+            if knowledge.base_url is not None:
+                knowledge_client = KnowledgeClient(knowledge)
+                application.state.knowledge_client = knowledge_client
+                resources.push_async_callback(knowledge_client.close)
+            client = None
+            employees = MySQLEmployeeRepository()
+            resources.push_async_callback(employees.close)
+            application.state.employee_repository = employees
             sqlite = SQLiteDatabase(sqlite_settings or load_sqlite_settings())
             resources.push_async_callback(sqlite.close)
             resources.push_async_callback(service.close)
+            if middleware.enabled:
+                client = MiddlewareClient(str(middleware.base_url), timeout_seconds=middleware.request_timeout_seconds)
+                resources.push_async_callback(client.close)
             application.state.sqlite_database = sqlite
             await sqlite.initialize()
+            dingtalk_config = dingtalk_settings or load_dingtalk_settings()
+            dingtalk = None
+            if dingtalk_config.configured:
+                dingtalk = DingTalkClient(dingtalk_config)
+                resources.push_async_callback(dingtalk.close)
+            application.state.personnel_refresh_service = PersonnelRefreshService(
+                dingtalk_config, employees, dingtalk, SQLitePersonnelSyncRepository(sqlite), service, client)
             ingestion = ingestion_settings or load_ingestion_settings()
             deletion = deletion_settings or load_deletion_settings()
             files = ReviewFileService(ingestion)
             application.state.review_file_service = files
             await files.initialize()
-            await service.start()
             directory = PlatformDirectoryService(
                 platform_directory_settings or load_platform_directory_settings(), service, middleware=middleware,
             )
             application.state.platform_directory_service = directory
             resources.push_async_callback(directory.close)
             await directory.start()
-            # 消费和人工审核共用认证、HTTP 连接与正式资源仓库；只有最终批准流程写入 MySQL。
+            application.state.user_access_service = UserAccessService(
+                employees, SQLiteUserAccessSyncRepository(sqlite), service, client, directory,
+                timeout_seconds=middleware.request_timeout_seconds)
+            platform_admins = PlatformAdminService(authorization, employees, service, client)
+            application.state.platform_admin_service = platform_admins
+            resources.push_async_callback(platform_admins.close)
+            application.state.auth_service = AuthService(service, client,
+                timeout_seconds=authorization.request_timeout_seconds)
+            # 消费和人工审核共用认证、HTTP 连接与正式资源仓库；文件申请只有最终批准才写入正式资源。
             database = None
-            client = None
             if middleware.enabled and (ingestion.enabled or deletion.enabled):
                 database = load_mysql_settings()
-            if middleware.enabled:
-                client = MiddlewareClient(str(middleware.base_url), timeout_seconds=middleware.request_timeout_seconds)
-                resources.push_async_callback(client.close)
-            # 正式文件查询和原件读取不依赖中间件；未启用消费时首次查询才连接 MySQL。
+            await service.start()
+            # 正式资源仓库按需连接；关闭后台消费后，管理员仍可查询和审核已有申请。
             repository = MySQLResourceRepository(database)
             resources.push_async_callback(repository.close)
             application.state.resource_repository = repository
+            adjustment_logs = SQLiteFileLevelAdjustmentRepository(sqlite)
+            await adjustment_logs.initialize()
+            application.state.file_level_adjustment_service = FileLevelAdjustmentService(
+                repository, adjustment_logs, service, client, timeout_seconds=middleware.request_timeout_seconds)
             reviews = SQLiteReviewRepository(sqlite)
             review_service = IngestionReviewService(reviews, repository, files, service, client,
                 timeout_seconds=middleware.request_timeout_seconds, retry_interval_seconds=middleware.retry_interval_seconds)
@@ -138,7 +180,7 @@ def create_app(
                 mllm = MLLMClient(model_config)
                 resources.push_async_callback(mllm.close)
                 candidates = ReadyResourceSearch(repository, model_name=embedding_config.model,
-                                                 dimensions=embedding_config.dimensions)
+                                                 dimensions=embedding_config.dimensions, embeddings=embeddings)
                 context = IngestionWorkflowContext(
                     middleware=client, sessions=service, embeddings=embeddings,
                     candidates=candidates, settings=ingestion,
@@ -174,16 +216,20 @@ def create_app(
             yield
 
     application = FastAPI(title="知识沉淀注册中心后端", version="0.1.0", lifespan=lifespan)
-    application.include_router(auth_router, prefix="/registry/api")
-    application.include_router(platform_router, prefix="/registry/api")
-    application.include_router(catalog_router, prefix="/registry/api")
-    application.include_router(resource_router, prefix="/registry/api")
-    application.include_router(ingestion_review_router, prefix="/registry/api")
-    application.include_router(deletion_review_router, prefix="/registry/api")
+    # 所有业务入口共用管理员边界；以后新增路由也应加入此组，避免遗漏授权。
+    api = APIRouter(prefix=API_PREFIX, dependencies=[Depends(require_platform_admin)], responses={
+        401: {'description': '用户 token 缺失、无效或已过期'},
+        403: {'description': '用户不是注册中心管理员'},
+        503: {'description': '中央认证或管理员依赖不可用'},
+    })
+    for router in (auth_router, user_router, platform_router, catalog_router, resource_router,
+                   ingestion_review_router, deletion_review_router):
+        api.include_router(router)
+    application.include_router(api)
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(request, exc):
-        # 默认 422 会回显错误输入，登录密钥等敏感字段不得进入响应。
+        # 默认 422 会回显原始输入，敏感请求字段不得进入响应。
         errors = [{key: error[key] for key in ("type", "loc", "msg")} for error in exc.errors()]
         return JSONResponse(status_code=422, content={"detail": errors})
 

@@ -29,7 +29,7 @@
 | 人工入库审核 | 查看待审列表和原件、批准或拒绝、选择多个通行证、查询审核历史。 |
 | 人工删除审核 | 核对正式文件与通行证、批准或拒绝、保留删除后的原件和文件信息快照。 |
 | 文件与平台查询 | 获取正式文件目录、下载原件、查看子平台存活状态及下次同步时间。 |
-| 人员认证 | 使用独立 YAML 名单和人员密钥登录，由服务端确定最终审核人。 |
+| 管理员鉴权 | 直接验证中央用户 token 及注册中心管理员，审核使用可信 userid。 |
 
 ---
 
@@ -70,16 +70,18 @@ registry-be/
 │   ├── infrastructure/      # 中间件、模型、向量和文件基础设施
 │   ├── workflow/ingestion/  # 入库主工作流
 │   ├── agent/               # 判重、通行证推荐子图
-│   └── user/                # 审核人员定义与名单加载
+│   └── auth/                # 统一身份模型与认证边界
 ├── description/             # API、架构、能力与开发规范
 ├── tests/                   # 测试、固定样本和隔离临时目录
 ├── experiment/              # 实验、联调和检查产物
 ├── scripts/                 # 显式迁移与实验脚本
-├── data/                    # 本地真实运行数据，不提交
+├── data/                    # 真实运行数据，仅提交固定目录占位
 ├── .env.example             # 配置示例
 ├── Dockerfile
 └── requirement.txt
 ```
+
+Git 仅追踪 `app/` 中的 Python 源码与 SQLite 初始化 SQL、部署配置与配置示例、项目描述文档，以及 `data/` 固定目录的 `.gitkeep`。`.env`、真实运行数据、`tests/`、`experiment/` 和 `scripts/` 保留在本地，不纳入版本管理；新克隆不包含这些本地测试与实验工具。完整规则见[运行配置说明](description/capability/application/runtime.md#版本管理范围)。
 
 ---
 
@@ -98,13 +100,12 @@ python -m pip check
 
 已有环境时直接激活并安装依赖即可。
 
-### 2. 准备配置和人员名单
+### 2. 准备配置
 
 保留已有实际配置，首次使用时复制示例：
 
 ```bash
 test -f .env || cp .env.example .env
-mkdir -p data/user
 chmod 600 .env
 ```
 
@@ -118,21 +119,13 @@ chmod 600 .env
 | 多模态模型 | `VLLM_MLLM_BASE_URL`、`VLLM_MLLM_MODEL` 及对应生成、思考和上下文预算配置。 |
 | 模型认证 | 两组独立的 `VLLM_*_API_KEY`，无需认证时留空。 |
 | 消费开关 | `INGESTION_ENABLED`、`DELETION_ENABLED` 分别控制后台申请接收。 |
-| 人员文件 | `REVIEWER_USER_FILE`，默认 `data/user/users.yaml`。 |
+| 头像代理 | `KNOWLEDGE_ACCUMULATION_BASE_URL`，填写容器或本机可达的知识后端根地址；缓存由 `KNOWLEDGE_ACCUMULATION_AVATAR_CACHE_SECONDS` 控制。 |
+| 通讯录刷新 | 按需配置 `DINGTALK_APP_KEY`、`DINGTALK_APP_SECRET`，仅用于已有员工姓名与部门刷新。 |
+| 用户认证 | 用户在知识后端登录；registry 使用 `AUTH_REQUEST_TIMEOUT_SECONDS` 配置中央 token 查询超时。 |
 
-在 `data/user/users.yaml` 创建人员名单，并将示例密钥替换为独立随机密钥：
+用户登录模式和钉钉登录凭据在 `knowledge-accumulation-be` 配置，registry 不再加载开发固定 token 或钉钉登录配置。两后端需读取同一权威人员与权限数据源；注册中心保留人员权限增量更新和平台管理员维护。
 
-```yaml
-users:
-  - name: "审核员姓名"
-    secret_key: "replace-with-a-unique-random-secret"
-```
-
-```bash
-chmod 600 data/user/users.yaml
-```
-
-人员文件缺失或格式不合法会阻止启动。环境变量优先于 `.env`；模型调用实际使用各自的 `VLLM_` 配置。完整参数见[运行配置](description/capability/application/runtime.md)、[向量服务](description/capability/infrastructure/myvector.md)、[多模态服务](description/capability/infrastructure/mllm.md)和[人员系统](description/capability/application/personnel.md)。
+环境变量优先于 `.env`。完整认证参数见[人员系统](description/capability/application/personnel.md)，模型与运行参数见[运行配置](description/capability/application/runtime.md)、[向量服务](description/capability/infrastructure/myvector.md)和[多模态服务](description/capability/infrastructure/mllm.md)。
 
 ### 3. 启动开发数据库与中间件
 
@@ -151,7 +144,7 @@ docker compose up -d --build --wait mysql
 cd ../registry-be
 ```
 
-新空卷由容器初始化正式资源表、向量缓存表和 MyVector 插件，后端不负责创建 MySQL 表。MySQL 仅保留最终版本初始化定义，已有卷不会自动更新表结构，具体见[版本边界](description/architecture/data/resource.md#初始化与版本边界)；SQLite 在应用启动时自动升级。
+新空卷由容器初始化正式资源、向量缓存、部门、员工、子平台管理员表和 MyVector 插件，后端不负责创建 MySQL 表。MySQL 仅保留最终版本初始化定义，已有卷不会自动更新表结构，具体见[版本边界](description/architecture/data/resource.md#初始化与版本边界)；SQLite 在应用启动时自动升级。
 
 中间件由独立项目部署，默认本机地址为 `http://127.0.0.1:22000`。启动后端前确认中间件及模型服务已准备好。
 
@@ -165,9 +158,9 @@ python app/main.py
 
 - Swagger：<http://127.0.0.1:23000/docs>
 - OpenAPI：<http://127.0.0.1:23000/openapi.json>
-- 业务接口前缀：`/registry/api`
+- 业务接口前缀：`/knowledge-accumulation/registry/api`
 
-`.env` 和人员 YAML 修改后需要手动重启。代码重载后会重新登录中间件，可能需要等待旧会话过期；已有人员免登码也会失效。
+`.env` 修改后需要手动重启。代码重载后会重新登录中间件，可能需要等待旧会话过期；用户 token 由中间件维护，不因 registry 重启自行失效；中央会话过期或用户重新登录后，旧 token 才会失效。
 
 ---
 
@@ -177,10 +170,9 @@ python app/main.py
 
 ```bash
 cd ../registry-deploy
-test -f user.yaml || cp user.yaml.example user.yaml
 ```
 
-编辑 `user.yaml` 替换示例人员及密钥，并确保容器 UID/GID `10001` 可读取该文件，然后启动：
+确认后端 `.env` 中 registry 平台凭据、模型与数据库配置完整，并在部署 `.env` 核对中间件及知识后端的容器可达地址，再启动：
 
 ```bash
 docker compose config --quiet
@@ -188,7 +180,7 @@ docker compose up -d --build --wait
 docker compose ps
 ```
 
-容器工作目录为 `/workspace`，内部端口为 `8000`，默认映射到宿主机 `127.0.0.1:23000`。Compose 使用命名卷持久化 MySQL 和后端运行数据，并单独只读挂载人员名单。
+容器工作目录为 `/workspace`，内部端口为 `8000`，默认映射到宿主机 `127.0.0.1:23000`。Compose 使用命名卷持久化 MySQL 和后端运行数据；认证配置通过环境变量注入。
 
 本机开发与容器使用不同的文件存储位置，已有本机数据不会自动进入命名卷。不要同时启动使用相同中间件平台身份的本机后端和容器后端。配置覆盖、目录权限、备份及迁移见[统一部署说明](../registry-deploy/readme.md)。
 
@@ -196,10 +188,10 @@ docker compose ps
 
 ## 接口与认证
 
-通过 `POST /registry/api/auth/login` 提交人员 `secret_key`，取得 `login_code`。其他业务接口使用以下请求头，最终审核人由服务端登录身份确定：
+用户先在知识后端登录取得用户 `access_token`。registry 每次直接向中间件查询该 token，取得可信 userid 并续期；不要求其他平台访问知识后端 verify。业务接口使用以下请求头，最终审核人使用服务端确认的 userid：
 
 ```text
-Authorization: Bearer <login_code>
+Authorization: Bearer <access_token>
 ```
 
 | 接口领域 | 文档 |
@@ -211,13 +203,17 @@ Authorization: Bearer <login_code>
 | 待入库列表、审核历史、最终决定 | [入库审核 API](description/api/ingestion-review.md) |
 | 待删除列表、审核历史、最终决定 | [删除审核 API](description/api/deletion-review.md) |
 
-完整路径、请求响应和错误语义以 [API 参考](description/api/readme.md)及 OpenAPI 为准。中间件的平台令牌与人员免登码相互独立。
+同一用户重新登录后，中央旧 token 立即失效；registry 不维护另一份本地用户 token 映射或固定 TTL，重启不会自行撤销中央用户会话。未知或过期 token 返回 401，中央用户或管理员查询故障返回 503；`GET /auth/me` 只返回中央 `userid`、`username` 并验证注册中心管理权限，旧 registry 登录接口已移除。详情见[中央用户认证](description/capability/infrastructure/middleware-user.md)。
+
+所有 registry 业务接口均要求有效中央用户 token 与注册中心（默认 `registry`）管理员身份，包括当前身份、平台列表及正式原件读取。普通用户返回403，文件等级不能替代管理员资格。头像由知识后端存储；registry 保留管理员专用代理 `/knowledge-accumulation/registry/api/resource/avatar/{filename}`，转发同一次请求的用户 token，配置见[头像代理](description/capability/infrastructure/avatar.md)。
+
+完整路径、请求响应和错误语义以 [API 参考](description/api/readme.md)及 OpenAPI 为准。中间件的平台令牌与生产登录 token相互独立。
 
 ---
 
 ## 测试与验证
 
-在已激活的 Python 环境、项目根目录下执行：
+以下命令仅适用于本地另行保留了 `tests/` 的开发环境；测试目录不纳入 Git，新克隆及部署镜像不包含测试。准备好本地测试工具后，在已激活的 Python 环境、项目根目录下执行：
 
 ```bash
 python -m unittest discover -s tests -v
@@ -231,7 +227,7 @@ python -m unittest discover -s tests -v
 
 ## 当前运行边界
 
-- 当前按单实例、单 worker 运行；人员免登码、消息处理锁和部分运行状态保存在进程内。
+- 当前按单实例、单 worker 运行；平台会话、消息处理锁和部分运行状态保存在进程内；用户 token 以中间件中央会话为准。
 - 智能判重与通行证推荐当前以 PDF 逐页渲染为基础；其他类型原件的下载支持不等同于智能审核支持。
 - HNSW 是近似检索，候选数量受 Top-K 限制；相似度阈值和智能体效果仍需结合真实业务样本持续评估。
 - 本地存储先完成，再向中间件发布审核结果；发布成功不代表来源平台已完成消费。跨系统没有统一事务，未确认反馈会保留恢复状态。
@@ -246,3 +242,9 @@ python -m unittest discover -s tests -v
 - [入库主工作流](description/architecture/workflow/ingestion/readme.md)：前置处理、判重、推荐与持久化。
 - [文件判重子图](description/architecture/workflow/file-deduplication/readme.md)与[通行证推荐子图](description/architecture/workflow/passport-recommendation/readme.md)：智能体契约与实现。
 - [开发规范](AGENTS.md)与[文档风格](description/documentation.md)：参与开发前的约定。
+
+
+管理员可通过 `POST /knowledge-accumulation/registry/api/user/refresh-all` 手动刷新已有员工姓名和部门；本项目通过 `.env` 的 `DINGTALK_APP_KEY`、`DINGTALK_APP_SECRET` 配置通讯录读取应用，其他业务不要求填写。头像、文件权限和管理员关系保持不变；姓名变化仅增量同步中央，详见[员工刷新配置与恢复](description/capability/application/personnel-refresh.md)。
+
+
+管理员可通过 `POST /knowledge-accumulation/registry/api/user/update-permissions` 按userid增量修改文件等级及平台管理员关系；先提交本地MySQL，再即时同步中间件，失败保留重试标记。请求字段和错误说明见[用户授权管理接口](description/api/user.md#更新用户权限与管理员关系)。

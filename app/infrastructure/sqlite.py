@@ -11,7 +11,7 @@ from app.config.sqlite import SQLiteSettings
 from app.model.passport import normalize_passports, encode_passports
 
 _SCHEMA_PATH = Path(__file__).with_name("sqlite_schema.sql")
-_SCHEMA_VERSION = 8
+_SCHEMA_VERSION = 10
 
 
 class SQLiteDatabase:
@@ -38,7 +38,7 @@ class SQLiteDatabase:
                 await connection.execute("PRAGMA foreign_keys=ON")
                 async with connection.execute("PRAGMA user_version") as cursor:
                     version = (await cursor.fetchone())[0]
-                if version not in (0, 1, 2, 3, 4, 5, 6, 7, _SCHEMA_VERSION):
+                if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, _SCHEMA_VERSION):
                     raise RuntimeError("SQLite 数据库版本不受当前应用支持")
                 async with connection.execute("PRAGMA journal_mode=WAL") as cursor:
                     if (await cursor.fetchone())[0].lower() != "wal":
@@ -119,6 +119,32 @@ class SQLiteDatabase:
                     await self._upgrade_passports(connection)
                 if version in (1, 2, 3, 4, 5, 6, 7):
                     await self._upgrade_deletion_snapshot(connection)
+                if version in (1, 2, 3, 4, 5, 6, 7, 8):
+                    # 旧版重建表可能已带新列；历史等级未知时保留 NULL，不猜测文件密级。
+                    await connection.execute("BEGIN IMMEDIATE")
+                    async with connection.execute("PRAGMA table_info(ingestion_reviews)") as cursor:
+                        columns = {row["name"] for row in await cursor.fetchall()}
+                    if 'file_level' not in columns:
+                        await connection.execute("ALTER TABLE ingestion_reviews ADD COLUMN file_level INTEGER NULL "
+                                                 "CHECK(file_level IS NULL OR typeof(file_level)='integer')")
+                    await connection.execute("PRAGMA user_version=9")
+                    await connection.commit()
+                if version in range(1, 10):
+                    # 删除后无法再读取正式资源，只从严格匹配的已批准入库记录恢复等级。
+                    await connection.execute("BEGIN IMMEDIATE")
+                    async with connection.execute("PRAGMA table_info(deletion_reviews)") as cursor:
+                        columns = {row["name"] for row in await cursor.fetchall()}
+                    if 'file_level' not in columns:
+                        await connection.execute("ALTER TABLE deletion_reviews ADD COLUMN file_level INTEGER NULL "
+                                                 "CHECK(file_level IS NULL OR typeof(file_level)='integer')")
+                    await connection.execute(
+                        "UPDATE deletion_reviews SET file_level=(SELECT i.file_level FROM ingestion_reviews AS i "
+                        "WHERE i.resource_id=deletion_reviews.resource_id AND i.status='approved' "
+                        "AND i.source_platform=deletion_reviews.source_platform "
+                        "AND i.source_id=deletion_reviews.source_id) WHERE file_level IS NULL"
+                    )
+                    await connection.execute("PRAGMA user_version=10")
+                    await connection.commit()
                 # 不把缺表的受损数据库误判为已成功初始化。
                 async with connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('ingestion_reviews','deletion_reviews')") as cursor:
                     if len(await cursor.fetchall()) != 2:
