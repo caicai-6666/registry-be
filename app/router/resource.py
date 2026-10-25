@@ -11,8 +11,9 @@ from app.infrastructure.knowledge import AvatarProxyError
 
 from app.router.dependency import (
     ResourceRepositoryDependency, IngestionReviewServiceDependency,
-    ReviewID, ingestion_review_error,
+    ReviewID, ingestion_review_error, AuthenticatedUserDependency,
 )
+from app.model.file_level import FILE_LEVEL
 from app.model.resource import StoredResource
 from app.service.review_files import ReviewFileService
 
@@ -25,6 +26,15 @@ router = APIRouter(
         503: {"description": "数据库或文件读取服务不可用"},
     },
 )
+
+
+# 普通用户入口独立挂载，仅按文件权限授权，不能继承管理路由组的依赖。
+reader_router = APIRouter(prefix="/resource", tags=["resource"], responses={
+    401: {"description": "用户 token 缺失、无效或已过期"},
+    403: {"description": "未获文件来源平台授权、等级不足或文件等级未知"},
+    404: {"description": "正式资源或磁盘原件不存在"},
+    503: {"description": "中央认证、数据库或文件读取服务不可用"},
+})
 
 
 async def get_review_file_service(request: Request) -> ReviewFileService:
@@ -40,7 +50,7 @@ ResourceID = Annotated[int, Path(gt=0, le=18446744073709551615, description="文
 
 
 async def get_stored_resource(resource_id: ResourceID, repository: ResourceRepositoryDependency) -> StoredResource:
-    """管理员依赖先行授权，此处只定位正式资源，不再根据文件等级绕过管理权。"""
+    """定位正式资源；授权由各下载入口的依赖单独完成。"""
     headers = {"Cache-Control": "no-store"}
     try:
         resource = await repository.find_by_id(resource_id)
@@ -53,6 +63,40 @@ async def get_stored_resource(resource_id: ResourceID, repository: ResourceRepos
 
 
 StoredResourceDependency = Annotated[StoredResource, Depends(get_stored_resource)]
+
+
+async def require_file_access(
+    request: Request, user: AuthenticatedUserDependency, resource: StoredResourceDependency,
+) -> StoredResource:
+    """先确认中央身份，再按正式文件来源平台比较权威员工等级，不使用管理员旁路。"""
+    headers = {"Cache-Control": "no-store"}
+    if resource.file_level is None:
+        raise HTTPException(403, "文件等级未知，暂不允许读取", headers=headers)
+    employees = getattr(request.app.state, "employee_repository", None)
+    if employees is None:
+        raise HTTPException(503, "员工权限查询暂不可用", headers=headers)
+    try:
+        level = FILE_LEVEL.validate_python(resource.file_level)
+        permissions = await employees.find_file_permissions(user.userid)
+    except (aiomysql.MySQLError, OSError, TimeoutError, ValueError, RuntimeError) as error:
+        logger.warning("文件权限查询失败：error_type=%s", type(error).__name__)
+        raise HTTPException(503, "文件权限查询暂不可用", headers=headers) from None
+    # 平台键不存在与显式等级 0 不同；只比较文件实际来源平台，禁止跨平台借用等级。
+    if permissions is None or resource.source_platform not in permissions or permissions[resource.source_platform] < level:
+        raise HTTPException(403, "无权读取该文件", headers=headers)
+    return resource
+
+
+ReadableResourceDependency = Annotated[StoredResource, Depends(require_file_access)]
+
+
+@reader_router.get("/authorized-file/{resource_id}", response_class=Response,
+    summary="按用户文件权限获取正式文件原件",
+    responses={200: {"description": "未经转换的正式文件原件",
+                     "content": {"*/*": {"schema": {"type": "string", "format": "binary"}}}}})
+async def get_authorized_resource_file(resource: ReadableResourceDependency,
+                                       files: ReviewFileServiceDependency) -> Response:
+    return await get_resource_file(resource, files)
 
 
 @router.get('/avatar/{filename:path}', response_class=Response, summary='代理获取用户头像',

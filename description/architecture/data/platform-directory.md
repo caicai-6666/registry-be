@@ -6,14 +6,22 @@
 
 ## 平台对象
 
-`app/model/platform.py` 的 `PlatformInfo` 是严格类型、不可变对象，只保留中间件的四个公开字段。字段缺失、类型错误、空白名称或描述、非法代号均拒绝；未知扩展字段不保留。
+`app/model/platform.py` 的 `PlatformInfo` 是严格类型、不可变对象，只保留中间件的八个上游字段。字段缺失、类型错误、空白名称或描述、非法代号均拒绝；未知扩展字段不保留。
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
 | `code` | string | 平台唯一代号，使用小写英文、数字及分隔用的连字符。 |
 | `name` | string | 平台中文展示名称。 |
 | `description` | string | 平台用途说明。 |
+| `supports_a2a` | boolean | 配置声明的是否参与 A2A 协议。 |
+| `is_sub_management_platform` | boolean | 配置声明的是否为子管理平台。 |
+| `is_management_entry` | boolean | 配置声明的是否作为管理平台入口。 |
+| `a2aresponsibility` | string | 平台在 A2A 协作中的职责，必填且允许空字符串，仅保存在内部目录，不在 registry 平台列表中返回。 |
 | `is_alive` | boolean | 最近一次查询时，中间件内是否存在该平台的有效登录会话。 |
+
+`a2aresponsibility` 严格接收字符串并保留原文，缺失、null 或其他类型导致整次刷新失败；子管理平台非空职责规则由中间件配置端负责。
+
+三个能力与类型标记均为必填严格布尔值，原样保留；不参与用户或管理员权限判断。
 
 完整列表按上游顺序保存，不允许重复 `code`。`is_alive` 不能接受字符串或数字代替布尔值，不表示业务健康、网络可达或消息服务健康。查询不会替其他平台续期。
 

@@ -38,7 +38,7 @@ MySQL `resources.passport` 使用可空 JSON 列，SQLite 两张审核表的 pas
 
 ## 数据库初始化与兼容
 
-MySQL 新容器通过[初始化 SQL](../../../../registry-deploy/mysql/init/001-resources.sql)直接创建 JSON 通行证列。当前不再提供旧版 MySQL 字符串列的迁移文件和升级工具，已有结构不会由应用启动自动修改；版本边界见[资源表说明](resource.md#初始化与版本边界)。
+MySQL 新容器通过[初始化 SQL](../../../../knowledge-accumulation-deploy/mysql/init/001-resources.sql)直接创建 JSON 通行证列。当前不再提供旧版 MySQL 字符串列的迁移文件和升级工具，已有结构不会由应用启动自动修改；版本边界见[资源表说明](resource.md#初始化与版本边界)。
 
 SQLite 保留独立自动升级能力：旧非空字符串转为单元素数组，旧空字符串转为 `[]`，SQL NULL 保持 NULL。旧字符串即使是 `a,b` 或 `["a","b"]`，也作为完整字符串保留，不擅自拆分。升级保留记录、索引、自增进度、审核决定与反馈凭据，不重新发布历史结论；当前版本及升级步骤见[SQLite 基础设施](../../capability/infrastructure/sqlite.md)。
 

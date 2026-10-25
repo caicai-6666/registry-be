@@ -12,6 +12,10 @@ class PlatformInfo(BaseModel):
     code: str = Field(pattern=r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", description="平台唯一代号。")
     name: str = Field(min_length=1, description="平台中文展示名称。")
     description: str = Field(min_length=1, description="平台用途说明。")
+    supports_a2a: bool = Field(description="平台配置声明的是否参与 A2A 协议，不参与权限判断。")
+    is_sub_management_platform: bool = Field(description="平台配置声明的是否为子管理平台，不参与权限判断。")
+    is_management_entry: bool = Field(description="平台配置声明的是否作为管理平台入口，不参与权限判断。")
+    a2aresponsibility: str = Field(description="平台在 A2A 协作中的职责，允许空字符串；仅保存于内部目录快照。")
     is_alive: bool = Field(description="中间件登录会话是否有效，不代表平台业务健康状态。")
 
     @field_validator("name", "description")

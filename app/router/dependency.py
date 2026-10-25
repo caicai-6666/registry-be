@@ -111,21 +111,33 @@ async def get_platform_admin_service(request: Request) -> PlatformAdminService:
 PlatformAdminServiceDependency = Annotated[PlatformAdminService, Depends(get_platform_admin_service)]
 
 
-async def require_platform_admin(
-    request: Request,
+async def require_user(
     service: AuthServiceDependency,
     authorization: Annotated[str | None, Header(alias="Authorization",
-        description="知识后端签发的中央用户 Bearer token；对应用户须具有 registry 管理权限。")] = None,
+        description="知识后端签发的中央用户 Bearer token。")] = None,
 ) -> AuthenticatedUser:
-    """唯一业务认证入口：先确认中央用户已登录，再验证注册中心管理权限。"""
+    """仅查询中央 token 对应的有效用户，不创建登录或推断管理权限。"""
     access_token = _bearer_access_token(authorization)
     try:
         user = await service.resolve_user(access_token) if access_token is not None else None
-        if user is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="access-token 无效或已过期",
-                headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"})
-        # 只有登录验证成功后才取得管理服务并查询名单；不提供只验证登录的依赖出口。
+    except AuthUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error),
+                            headers={"Cache-Control": "no-store"}) from None
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="access-token 无效或已过期",
+            headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"})
+    return user
+
+
+AuthenticatedUserDependency = Annotated[AuthenticatedUser, Depends(require_user)]
+
+
+async def require_platform_admin(
+    request: Request, user: AuthenticatedUserDependency,
+) -> AuthenticatedUser:
+    """管理入口在中央用户验证成功后，再校验当前注册中心管理权限。"""
+    try:
         admins = await get_platform_admin_service(request)
         allowed = await admins.is_current_platform_admin(user)
     except AuthUnavailable as error:
@@ -155,6 +167,8 @@ __all__ = [
     "get_auth_service",
     "get_platform_admin_service",
     "PlatformAdminServiceDependency",
+    "require_user",
+    "AuthenticatedUserDependency",
     "require_platform_admin",
     "PlatformAdminUserDependency",
 ]

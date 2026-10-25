@@ -30,7 +30,7 @@ from app.router.platform import router as platform_router
 from app.repository.file_level_adjustment import SQLiteFileLevelAdjustmentRepository
 from app.service.file_level_adjustment import FileLevelAdjustmentService
 from app.router.catalog import router as catalog_router
-from app.router.resource import router as resource_router
+from app.router.resource import router as resource_router, reader_router as resource_reader_router
 from app.router.ingestion_review import router as ingestion_review_router
 from app.router.deletion_review import router as deletion_review_router
 
@@ -216,7 +216,7 @@ def create_app(
             yield
 
     application = FastAPI(title="知识沉淀注册中心后端", version="0.1.0", lifespan=lifespan)
-    # 所有业务入口共用管理员边界；以后新增路由也应加入此组，避免遗漏授权。
+    # 管理业务共用管理员边界；正式文件的普通用户读取入口单独声明文件授权依赖。
     api = APIRouter(prefix=API_PREFIX, dependencies=[Depends(require_platform_admin)], responses={
         401: {'description': '用户 token 缺失、无效或已过期'},
         403: {'description': '用户不是注册中心管理员'},
@@ -226,6 +226,7 @@ def create_app(
                    ingestion_review_router, deletion_review_router):
         api.include_router(router)
     application.include_router(api)
+    application.include_router(resource_reader_router, prefix=API_PREFIX)
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(request, exc):

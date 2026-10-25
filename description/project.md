@@ -12,7 +12,7 @@
 
 本项目同时提供一系列智能体功能，辅助并赋能注册中心的管理工作。具体能力与使用场景将在后续需求中逐步明确。
 
-用户登录、用户及平台管理员全表注册由知识后端负责；本项目的[人员身份服务](capability/application/personnel.md)直接查询中间件用户 token，并维护用户权限与平台管理员；[入库审核接口](api/ingestion-review.md)使用登录身份确定最终审核人。 所有 registry 业务接口统一要求中央登录有效且具有注册中心管理权，具体依赖与错误边界见[管理员授权](capability/application/authorization.md)。
+用户登录、用户及平台管理员全表注册由知识后端负责；本项目的[人员身份服务](capability/application/personnel.md)直接查询中间件用户 token，并维护用户权限与平台管理员；[入库审核接口](api/ingestion-review.md)使用登录身份确定最终审核人。 registry 管理接口统一要求中央登录有效且具有注册中心管理权；另提供[正式文件权限下载](api/resource.md#按用户权限获取正式文件原件)，允许中央登录有效且来源平台文件等级足够的用户访问，具体依赖与错误边界见[管理员授权](capability/application/authorization.md)。
 
 ---
 
@@ -58,7 +58,7 @@
 
 接口契约、数据定义、工作流和运行配置等细节应在对应专题文档中维护，并通过统一导航提供入口。
 
-本项目使用 MySQL 作为关系型数据库，镜像与统一部署由同级的 `registry-deploy` 项目维护，MySQL 镜像目录为 `registry-deploy/mysql`；资源表由 `registry-deploy/mysql/init/` 脚本在 MySQL 容器首次初始化时创建，后端已提供入库申请持久化能力。
+本项目使用 MySQL 作为关系型数据库，镜像与统一部署由同级的 `knowledge-accumulation-deploy` 项目维护，MySQL 镜像目录为 `knowledge-accumulation-deploy/mysql`；资源表由 `knowledge-accumulation-deploy/mysql/init/` 脚本在 MySQL 容器首次初始化时创建，后端已提供入库申请持久化能力。
 
 已接入 `middleware-service` 的平台注册登录与心跳服务，后端启动后自动建立并维护平台会话。后台入库接收服务持续执行完整入库图，下载前按[源文件身份规则](capability/application/source-identity.md)阻断同平台同源的活跃重复申请；重复申请自动反馈拒绝结果，不重复申请保存原文件、摘要向量与通行证建议到 SQLite 待审队列后确认消费。[人工入库审核](capability/application/ingestion-review.md)已实现待审列表、原件读取、批准后的正式存储及拒绝反馈。已提供[删除申请接收服务](capability/application/deletion-consumer.md)，以正式资源原文件作为审核引用，保存待审记录或发布自动拒绝后确认消费。[人工删除审核](capability/application/deletion-review.md)已实现待审列表、按审核员查询历史和最终决定；批准后移除正式资源并保留原件，完成本地存储后向中间件反馈。
 

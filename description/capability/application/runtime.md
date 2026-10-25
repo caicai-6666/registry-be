@@ -130,7 +130,7 @@ docker run -d --name registry-be-dev \
 
 容器内 Uvicorn 固定监听 `0.0.0.0:8000`。环境变量在运行时注入，`.env` 不复制进镜像；镜像不再设置已迁出的 `APP_ENV` 登录模式。
 
-中间件与数据库配置由环境变量注入，无需人员名单挂载；不存在开发登录、钉钉或头像配置；所有业务请求统一校验中央 token 和注册中心管理员。
+中间件与数据库配置由环境变量注入，无需人员名单挂载；不恢复开发登录或本地头像存储配置；通讯录刷新和头像代理按对应专题配置。管理请求校验中央 token 和注册中心管理员，独立的普通用户正式原件入口校验中央 token 与来源平台文件等级。
 
 上述 Docker 命令直接读取 `KEY=value`。本地 `.env` 使用无外围引号的值，保证本机配置读取与 Docker 一致；Docker `--env-file` 不会按 dotenv 规则去除引号。
 
@@ -153,9 +153,9 @@ docker logs -f registry-be-dev
 
 ## 与统一部署的关系
 
-后端已加入 `registry-deploy` 的 Compose `backend` 服务，构建上下文为 `../registry-be`，数据库连接固定为 `mysql:3306`，等待 MySQL 健康检查通过后启动。运行配置读取 `registry-be/.env` 并由部署环境覆盖数据库及容器目录。
+后端已加入 `knowledge-accumulation-deploy` 的 Compose `backend` 服务，构建上下文为 `../registry-be`，数据库连接固定为 `mysql:3306`，等待 MySQL 健康检查通过后启动。运行配置读取 `registry-be/.env` 并由部署环境覆盖数据库及容器目录。
 
-Compose 使用 `backend-data:/workspace/data` 持久化运行数据，认证配置从后端 `.env` 原样注入，无需人员文件。完整准备与启动步骤见[统一部署说明](../../../../registry-deploy/readme.md#管理员认证与人员数据)。该方式与上面的手工 `docker run` 示例分别使用独立数据卷，不会自动互相迁移数据。
+Compose 使用 `backend-data:/workspace/data` 持久化运行数据，认证配置从后端 `.env` 原样注入，无需人员文件。完整准备与启动步骤见[统一部署说明](../../../../knowledge-accumulation-deploy/readme.md#管理员认证与人员数据)。该方式与上面的手工 `docker run` 示例分别使用独立数据卷，不会自动互相迁移数据。
 
 Compose 还覆盖 `KNOWLEDGE_ACCUMULATION_BASE_URL`，默认通过 `http://host.docker.internal:24000` 访问宿主机知识后端；可在部署 `.env` 改为实际可达的地址。头像超时、大小和缓存时长，以及钉钉通讯录刷新配置，继续从后端 `.env` 读取。
 

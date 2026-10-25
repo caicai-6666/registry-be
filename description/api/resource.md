@@ -9,6 +9,7 @@
 | [代理读取用户头像](#代理读取用户头像) | `GET` | `/knowledge-accumulation/registry/api/resource/avatar/{filename}` |
 | [按 ID 获取正式文件原件](#按-id-获取正式文件原件) | `GET` | `/knowledge-accumulation/registry/api/resource/file/{resource_id}` |
 | [按审核 ID 获取待入库文件原件](#按审核-id-获取待入库文件原件) | `GET` | `/knowledge-accumulation/registry/api/resource/ingestion/{review_id}` |
+| [按用户权限获取正式文件原件](#按用户权限获取正式文件原件) | `GET` | `/knowledge-accumulation/registry/api/resource/authorized-file/{resource_id}` |
 
 ---
 
@@ -217,3 +218,62 @@ python -m unittest tests.test_resource_api tests.test_catalog_api
 ## 员工头像迁移
 
 头像读取已迁至 `knowledge-accumulation-be` 的 `GET /knowledge-accumulation/api/resource/avatar/{filename}`，仅要求正常中央用户登录；registry 的旧头像入口已移除并返回 404。用户身份与平台管理员资料中的 `avatar_url` 继续只返回文件名，由调用方拼接新接口地址。本项目不再装配头像文件服务或读取 `AVATAR_*` 配置。
+
+
+---
+
+## 按用户权限获取正式文件原件
+
+`GET /knowledge-accumulation/registry/api/resource/authorized-file/{resource_id}`，供已登录用户按文件访问等级下载正式入库原件，不要求 registry 管理员身份。
+
+### 认证方式
+
+携带知识后端签发的 `Authorization: Bearer <access_token>`。通过中间件 `POST /middleware-service/api/user/login-cache` 验证对应的有效用户并续期，再以可信 userid 查询本地权威员工表的 `platform_permissions`。
+
+### 请求参数
+
+| 位置 | 名称 | 类型 | 必填 | 约束 |
+| --- | --- | --- | --- | --- |
+| Header | Authorization | string | 是 | `Bearer <access_token>`。 |
+| path | resource_id | integer | 是 | MySQL 正式资源主键，范围 1—18446744073709551615，非 source_id 或 SQLite 审核 ID。 |
+
+无 query 参数，无请求体。
+
+### 成功响应
+
+`200 OK`，返回文件原始二进制字节，`Content-Type` 按存储文件名推断，未知类型为 `application/octet-stream`。不转码、不渲染、不返回 JSON。示例响应头：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="original.pdf"
+Cache-Control: no-store
+X-Content-Type-Options: nosniff
+```
+
+### 错误响应
+
+| 状态 | 条件 |
+| --- | --- |
+| 401 | 用户 token 缺失、无效、过期或被重新登录替换。 |
+| 403 | 本地员工不存在、没有文件来源平台键、等级不足或文件等级为 null。 |
+| 404 | 正式资源不存在，或授权后找不到正式目录中的原件。 |
+| 422 | resource_id 格式或范围不合法。 |
+| 503 | 中央认证、员工权限、正式资源查询、存储路径校验或文件读取失败。 |
+
+错误为 `application/json`，如 `{"detail":"无权读取该文件"}`；均禁止缓存，内部路径、SQL 与凭据不回显。
+
+### 请求示例
+
+```bash
+curl --fail-with-body \
+  'http://127.0.0.1:23000/knowledge-accumulation/registry/api/resource/authorized-file/123' \
+  -H 'Authorization: Bearer <替换为用户access_token>' \
+  -o original.pdf
+```
+
+### 行为与边界
+
+权限判断为：必须显式存在 `platform_permissions[resource.source_platform]`，且该等级大于或等于 `resources.file_level`。显式 0 可以读取等级 0 的文件，缺键不会默认成 0；其他平台的等级与所有管理员关系均不能用于此入口旁路授权。每次请求读取当前 MySQL 权限和文件等级，不采用登录时附带的旧权限副本。
+
+只查询 MySQL 正式资源，并从 `RESOURCE_ROOT/<source_platform>/<file_url>` 安全读取；不读取待审或删除保留目录。原有 `/resource/file/{resource_id}` 仍为管理员下载入口；本接口不开放文件列表、审核记录或其他管理功能。

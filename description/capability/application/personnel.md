@@ -26,7 +26,7 @@
 
 [员工仓库](../../architecture/data/employee.md)提供权威资料、文件等级映射与管理员关联展示。两后端须对齐同一权威人员数据源；不能分别维护两份权限。认证不查员工表；`/auth/me` 只返回中央 userid 与 username，不暴露完整人员资料。员工仓库仅用于独立的管理和资料展示查询，其故障不影响身份验证。
 
-所有业务路由统一使用 `PlatformAdminUserDependency`，内部顺序完成中央登录与注册中心管理员校验，不提供单独的仅登录认证依赖。人工审核接口直接从该认证结果取可信 userid 记录审核员，不另设审核员认证依赖。文件访问等级与管理权独立，具体见[授权依赖](authorization.md)。
+管理路由统一使用 `PlatformAdminUserDependency`，内部顺序完成中央登录与注册中心管理员校验。普通用户正式原件入口单独复用 `AuthenticatedUserDependency` 并校验来源平台文件等级，不要求管理员。人工审核接口直接从该认证结果取可信 userid 记录审核员，不另设审核员认证依赖。文件访问等级与管理权独立，具体见[授权依赖](authorization.md)。
 
 头像保存与磁盘读取均由知识后端负责，registry 可通过带管理员鉴权的 HTTP 代理转发读取，接口为 `GET /knowledge-accumulation/api/resource/avatar/{filename}`，仅要求登录；平台目录等管理员展示中的头像字段仍是文件名，迁移与目录边界见[头像迁移说明](../infrastructure/avatar.md)。
 

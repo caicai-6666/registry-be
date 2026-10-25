@@ -1,6 +1,6 @@
 # MySQL 与统一部署
 
-本项目使用 MySQL 作为关系型数据库。镜像构建和运行部署由与后端同级的 `registry-deploy` 项目维护，MySQL 镜像位于其 `mysql` 子目录。
+本项目使用 MySQL 作为关系型数据库。镜像构建和运行部署由与后端同级的 `knowledge-accumulation-deploy` 项目维护，MySQL 镜像位于其 `mysql` 子目录。
 
 ---
 
@@ -8,8 +8,8 @@
 
 | 项目 | 职责 | 阅读入口 |
 | --- | --- | --- |
-| `registry-deploy/mysql` | 维护 MySQL 镜像构建与默认字符集配置。 | [MySQL 镜像说明](../../../../registry-deploy/mysql/readme.md) |
-| `registry-deploy` | 维护 Compose 服务、环境变量、网络和数据持久化。 | [统一部署说明](../../../../registry-deploy/readme.md) |
+| `knowledge-accumulation-deploy/mysql` | 维护 MySQL 镜像构建与默认字符集配置。 | [MySQL 镜像说明](../../../../knowledge-accumulation-deploy/mysql/readme.md) |
+| `knowledge-accumulation-deploy` | 维护 Compose 服务、环境变量、网络和数据持久化。 | [统一部署说明](../../../../knowledge-accumulation-deploy/readme.md) |
 | `registry-be` | 维护数据库访问与正式资源数据契约。 | [项目总览](../../project.md) |
 
 ---
@@ -20,7 +20,7 @@
 
 `departments`、`employees` 和 `platform_admins` 保存顶级部门、钉钉 userid、平台文件权限和管理员关系，定义见[公司部门与员工契约](../../architecture/data/employee.md)。首次钉钉员工初始化、用户及管理员全表注册均由知识后端负责；registry 查询同一权威人员源，并负责后续人员权限和管理员维护。当前查询需要上述表的 SELECT 权限，不能沿用旧的 registry 登录初始化写入流程；[员工资料刷新](../application/personnel-refresh.md)还需要 employees 的 name/department_id UPDATE 与 departments INSERT/UPDATE 权限，保留头像、文件权限和管理员关联。[用户授权管理](../application/user-access.md)需要employees.platform_permissions的UPDATE及platform_admins的INSERT/DELETE权限，不新增MySQL表。
 
-后端已提供正式资源表与只读检索连接池，待审核申请持久化由 SQLite 承担，字段约束见[注册中心资源表契约](../../architecture/data/resource.md)。建表 SQL 由 `registry-deploy/mysql/init/` 维护并打包进 MySQL 镜像，在空数据目录首次启动时执行。资源仓库只初始化连接池，不执行建表；已有数据卷不会重跑脚本，当前仅保留最终版本初始化定义，不再提供历史 MySQL 迁移文件；旧结构处理边界见[资源表说明](../../architecture/data/resource.md#初始化与版本边界)。
+后端已提供正式资源表与只读检索连接池，待审核申请持久化由 SQLite 承担，字段约束见[注册中心资源表契约](../../architecture/data/resource.md)。建表 SQL 由 `knowledge-accumulation-deploy/mysql/init/` 维护并打包进 MySQL 镜像，在空数据目录首次启动时执行。资源仓库只初始化连接池，不执行建表；已有数据卷不会重跑脚本，当前仅保留最终版本初始化定义，不再提供历史 MySQL 迁移文件；旧结构处理边界见[资源表说明](../../architecture/data/resource.md#初始化与版本边界)。
 
 后端已提供[服务入口与容器配置](../application/runtime.md)，并接入 Compose，等待 MySQL 健康检查通过后启动。消息中间件部署仍由对应项目维护。
 

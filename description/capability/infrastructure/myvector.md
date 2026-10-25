@@ -12,7 +12,7 @@
 | `app/service/embedding.py` | 提供异步文本向量生成，检查维度、有限数值与非零向量。 |
 | `app/infrastructure/myvector.py` | 自定义 LlamaIndex 向量库，支持异步节点写入、HNSW 检索和文档删除。 |
 | `scripts/myvector_trial.py` | 启动独立容器，验证真实模型、检索、HNSW 与过滤能力，结束后清理。 |
-| `registry-deploy/mysql/init/002-myvector-documents.sql` | 索引缓存建表定义，由部署初始化或显式迁移创建。 |
+| `knowledge-accumulation-deploy/mysql/init/002-myvector-documents.sql` | 索引缓存建表定义，由部署初始化或显式迁移创建。 |
 
 进程环境优先于根目录 `.env`，不展开环境变量引用。
 

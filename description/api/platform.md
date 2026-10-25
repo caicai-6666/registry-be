@@ -35,6 +35,9 @@
     "code": "contract-pheno",
     "name": "合同平台",
     "description": "合同文件管理",
+    "supports_a2a": true,
+    "is_sub_management_platform": true,
+    "is_management_entry": false,
     "is_alive": true,
     "admins": [
       {"userid": "employee-001", "name": "员工甲", "avatar_url": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.webp"},
@@ -45,21 +48,29 @@
     "code": "offline-platform",
     "name": "离线平台",
     "description": "平台当前会话已失活",
+    "supports_a2a": false,
+    "is_sub_management_platform": false,
+    "is_management_entry": false,
     "is_alive": false,
     "admins": []
   }
 ]
 ```
 
-每个条目只包含下列五个字段：
+每个条目包含下列八个字段：
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
 | `code` | string | 平台代码。 |
 | `name` | string | 平台名称。 |
 | `description` | string | 平台用途描述。 |
+| `supports_a2a` | boolean | 中间件配置声明的是否参与 A2A 协议。 |
+| `is_sub_management_platform` | boolean | 中间件配置声明的是否为子管理平台。 |
+| `is_management_entry` | boolean | 中间件配置声明的是否作为管理平台入口。 |
 | `is_alive` | boolean | 最近同步确认的中间件会话存活状态，可以为 true 或 false。 |
 | `admins` | object[] | 管理员资料列表，每项包含 `userid`、`name` 和 `avatar_url`；无管理员时为 `[]`。按员工 userid 排序。 |
+
+三个能力与类型标记随后台平台目录一起刷新，不表示用户权限，不改变注册中心管理员校验；失活平台仍保留其标记。
 
 `admins[].userid` 为管理员的员工唯一标识，可供前端关联用户列表；`admins[].name` 为管理员姓名，历史姓名未知时使用 userid；`admins[].avatar_url` 为头像文件名，无头像时为 null。头像值与登录返回保持一致，不包含目录或域名，使用 `GET /knowledge-accumulation/api/resource/avatar/{filename}` 并携带登录 token 读取，详见[头像迁移说明](../capability/infrastructure/avatar.md)。原字符串数组字段 `admin_names` 已替换为对象数组 `admins`。
 

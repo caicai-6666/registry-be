@@ -42,6 +42,9 @@ async def list_platforms(response: Response, service: PlatformDirectoryDependenc
         raise HTTPException(status_code=503, detail=str(error),
                             headers={"Cache-Control": "no-store"}) from None
     return [PlatformResponse(code=platform.code, name=platform.name, description=platform.description,
+                             supports_a2a=platform.supports_a2a,
+                             is_sub_management_platform=platform.is_sub_management_platform,
+                             is_management_entry=platform.is_management_entry,
                              is_alive=platform.is_alive, admins=profiles.get(platform.code, []))
             for platform in platforms]
 

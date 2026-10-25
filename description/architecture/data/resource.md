@@ -1,6 +1,6 @@
 # 注册中心资源表契约
 
-`resources` 只保存已经通过入库审核的正式文件。待审核申请、审核状态和推荐过程保存在 [SQLite 审核表](review.md)，通过唯一资源 ID 关联。建表执行来源为 [001-resources.sql](../../../../registry-deploy/mysql/init/001-resources.sql)，由 MySQL 容器首次初始化时创建；后端启动不执行 MySQL DDL。
+`resources` 只保存已经通过入库审核的正式文件。待审核申请、审核状态和推荐过程保存在 [SQLite 审核表](review.md)，通过唯一资源 ID 关联。建表执行来源为 [001-resources.sql](../../../../knowledge-accumulation-deploy/mysql/init/001-resources.sql)，由 MySQL 容器首次初始化时创建；后端启动不执行 MySQL DDL。
 
 ---
 
@@ -70,7 +70,7 @@ MySQL 不再使用基于状态的函数唯一索引或平台状态索引。SQLit
 
 ## 初始化与版本边界
 
-当前 MySQL 仅维护最终版本的[初始化定义](../../../../registry-deploy/mysql/init/001-resources.sql)，由容器在空数据目录首次启动时执行。历史增量迁移文件及后端 MySQL 升级工具已移除，新部署无需依次执行旧版本变更。
+当前 MySQL 仅维护最终版本的[初始化定义](../../../../knowledge-accumulation-deploy/mysql/init/001-resources.sql)，由容器在空数据目录首次启动时执行。历史增量迁移文件及后端 MySQL 升级工具已移除，新部署无需依次执行旧版本变更。
 
 已有数据卷不会重新执行初始化脚本，`CREATE TABLE IF NOT EXISTS` 不能升级已有表。旧结构如需继续使用，应先备份并单独制定数据转换方案；当前后端按本文的正式资源契约运行。
 
@@ -88,7 +88,7 @@ MySQL 不再使用基于状态的函数唯一索引或平台状态索引。SQLit
 
 新批准必须显式提供 `file_level`，与 SQLite 已冻结决定保持一致，重试不允许变更等级。正式资源记录保存该值，目录接口返回同名字段。文件等级独立于平台管理权限，不定义业务枚举。正式原件读取要求用户在 `source_platform` 的文件访问等级大于或等于 `file_level`，或为注册中心管理员；历史 null 等级仅允许管理员读取。执行规则见[授权依赖](../../capability/application/authorization.md)。
 
-已有资源的等级保持 NULL，不回填为 0。初始化脚本只对新表生效；已有库需按 [MySQL 升级说明](../../../../registry-deploy/mysql/readme.md#文件等级字段)增加字段，不通过重建或清空业务卷升级。
+已有资源的等级保持 NULL，不回填为 0。初始化脚本只对新表生效；已有库需按 [MySQL 升级说明](../../../../knowledge-accumulation-deploy/mysql/readme.md#文件等级字段)增加字段，不通过重建或清空业务卷升级。
 
 
 正式入库后的等级通过 [catalog 等级调整接口](../../api/catalog.md#调整正式文件等级)修改；当前值保存在本表，历史过程保存在 [SQLite 文件等级调整日志](file-level-adjustment.md)，原入库审核等级不改写。

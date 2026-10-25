@@ -2,7 +2,7 @@
 
 面向知识沉淀各子平台的文件注册与审核服务。通过 `middleware-service` 接收入库、删除申请，结合智能体辅助与人工审核管理正式文件，并将最终结果反馈给来源平台。
 
-本项目负责注册中心后端；前端位于同级 `registry-fe`，MySQL 镜像与统一部署位于同级 [registry-deploy](../registry-deploy/readme.md)。
+本项目负责注册中心后端；前端位于同级 `registry-fe`，MySQL 镜像与统一部署位于同级 [knowledge-accumulation-deploy](../knowledge-accumulation-deploy/readme.md)。
 
 ## 目录
 
@@ -132,7 +132,7 @@ chmod 600 .env
 数据库由同级部署项目管理：
 
 ```bash
-cd ../registry-deploy
+cd ../knowledge-accumulation-deploy
 test -f .env || cp .env.example .env
 ```
 
@@ -166,10 +166,10 @@ python app/main.py
 
 ## 容器部署
 
-统一部署使用 [registry-deploy/docker-compose.yaml](../registry-deploy/docker-compose.yaml)，联动 MySQL 与后端。在后端 `.env` 和部署 `.env` 已准备好的基础上，从本项目根目录执行：
+统一部署使用 [knowledge-accumulation-deploy/docker-compose.yaml](../knowledge-accumulation-deploy/docker-compose.yaml)，联动 MySQL 与后端。在后端 `.env` 和部署 `.env` 已准备好的基础上，从本项目根目录执行：
 
 ```bash
-cd ../registry-deploy
+cd ../knowledge-accumulation-deploy
 ```
 
 确认后端 `.env` 中 registry 平台凭据、模型与数据库配置完整，并在部署 `.env` 核对中间件及知识后端的容器可达地址，再启动：
@@ -182,7 +182,7 @@ docker compose ps
 
 容器工作目录为 `/workspace`，内部端口为 `8000`，默认映射到宿主机 `127.0.0.1:23000`。Compose 使用命名卷持久化 MySQL 和后端运行数据；认证配置通过环境变量注入。
 
-本机开发与容器使用不同的文件存储位置，已有本机数据不会自动进入命名卷。不要同时启动使用相同中间件平台身份的本机后端和容器后端。配置覆盖、目录权限、备份及迁移见[统一部署说明](../registry-deploy/readme.md)。
+本机开发与容器使用不同的文件存储位置，已有本机数据不会自动进入命名卷。不要同时启动使用相同中间件平台身份的本机后端和容器后端。配置覆盖、目录权限、备份及迁移见[统一部署说明](../knowledge-accumulation-deploy/readme.md)。
 
 ---
 
@@ -205,7 +205,7 @@ Authorization: Bearer <access_token>
 
 同一用户重新登录后，中央旧 token 立即失效；registry 不维护另一份本地用户 token 映射或固定 TTL，重启不会自行撤销中央用户会话。未知或过期 token 返回 401，中央用户或管理员查询故障返回 503；`GET /auth/me` 只返回中央 `userid`、`username` 并验证注册中心管理权限，旧 registry 登录接口已移除。详情见[中央用户认证](description/capability/infrastructure/middleware-user.md)。
 
-所有 registry 业务接口均要求有效中央用户 token 与注册中心（默认 `registry`）管理员身份，包括当前身份、平台列表及正式原件读取。普通用户返回403，文件等级不能替代管理员资格。头像由知识后端存储；registry 保留管理员专用代理 `/knowledge-accumulation/registry/api/resource/avatar/{filename}`，转发同一次请求的用户 token，配置见[头像代理](description/capability/infrastructure/avatar.md)。
+除[按用户权限获取正式原件](description/api/resource.md#按用户权限获取正式文件原件)外，registry 管理接口均要求有效中央用户 token 与注册中心（默认 `registry`）管理员身份，包括当前身份、平台列表及正式原件读取。普通用户返回403，文件等级不能替代管理员资格。头像由知识后端存储；registry 保留管理员专用代理 `/knowledge-accumulation/registry/api/resource/avatar/{filename}`，转发同一次请求的用户 token，配置见[头像代理](description/capability/infrastructure/avatar.md)。
 
 完整路径、请求响应和错误语义以 [API 参考](description/api/readme.md)及 OpenAPI 为准。中间件的平台令牌与生产登录 token相互独立。
 

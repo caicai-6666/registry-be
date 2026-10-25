@@ -62,6 +62,19 @@ class MySQLEmployeeRepository:
             return None
         return _user(row)
 
+    async def find_file_permissions(self, userid: str) -> dict[str, int] | None:
+        """仅从权威员工行读取文件权限，不查询部门或管理员关联。"""
+        await self._initialize()
+        async with asyncio.timeout(self._settings.operation_timeout_seconds):
+            async with self._pool.acquire() as connection, connection.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute('SELECT platform_permissions FROM employees WHERE userid=%s', (userid,))
+                row = await cursor.fetchone()
+        if row is None:
+            return None
+        # 复用严格非负整数契约，损坏的权限数据不能通过默认值放行。
+        return AuthenticatedUser(userid=userid,
+            platform_permissions=json.loads(row['platform_permissions'])).platform_permissions
+
     async def list_departments(self) -> list[DepartmentInfo]:
         """读取已登记部门，包含暂无员工的部门；失败不能伪装为空列表。"""
         await self._initialize()
