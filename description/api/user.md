@@ -1,6 +1,6 @@
 # 人员管理 API
 
-提供注册中心管理所需的人员与部门查询。统一前缀为 `/knowledge-accumulation/registry/api/user`，返回 JSON；授权规则见[管理员授权](../capability/application/authorization.md)。
+提供员工与部门查询、已有员工资料刷新及文件权限与管理员关系维护。统一前缀为 `/knowledge-accumulation/registry/api/user`，返回 JSON；授权规则见[管理员授权](../capability/application/authorization.md)。
 
 ## 接口目录
 
@@ -24,17 +24,18 @@
 **成功响应：** `200 application/json`，携带 `Cache-Control: no-store`：
 
 ```json
-[{"userid":"employee-001","name":"张三","avatar_url":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.webp","department_id":1,"platform_permissions":{"registry":0}}]
+[{"userid":"employee-001","name":"张三","avatar_url":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.webp","department_id":1,"department_ids":[1],"platform_permissions":{"registry":0}}]
 ```
 
-每项固定五个字段：
+每项包含以下六个字段：
 
 | 字段 | 类型与含义 |
 | --- | --- |
 | `userid` | 员工唯一字符串标识，区分大小写。 |
 | `name` | 员工姓名，未补全为 null；沿用数据库字段名，不改为 username。 |
 | `avatar_url` | 头像文件名，无头像为 null；读取使用知识后端头像接口。 |
-| `department_id` | 顶级部门 ID，前端与部门列表自行关联。 |
+| `department_id` | 旧版兼容部门 ID，不代表唯一或主要归属。 |
+| `department_ids` | 全部一级部门 ID，前端与部门列表关联展示。 |
 | `platform_permissions` | 平台文件访问等级对象；缺少平台键表示未授权，显式 0 保持原值，不表示管理权。 |
 
 **错误响应：**
@@ -52,7 +53,7 @@ curl 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/user/user-list'
   -H 'Authorization: Bearer replace-with-user-access-token'
 ```
 
-**行为与边界：** 只执行 employees 单表查询，不 JOIN、不查询部门或管理员关系，不返回 department_name、managed_platforms、登录状态或 token。头像沿用已有约定，将数据库相对路径转换为文件名；JSON 权限解析为对象。空表返回 []，数据库或数据解析故障返回脱敏 503，不伪装为空表。不请求钉钉或中间件总表，不包含只存在于知识后端开发配置中的模拟身份。复用员工仓库与现有 MySQL 配置，具体字段见[人员存储契约](../architecture/data/employee.md)，实现为 `MySQLEmployeeRepository.list_employee_records()`。
+**行为与边界：** 只执行 employees 单表查询，不 JOIN、不查询部门或管理员关系，不返回 department_name、managed_platforms、登录状态或 token。头像沿用已有约定，将数据库相对路径转换为文件名；JSON 权限解析为对象。`department_ids` 为历史 NULL 时回退为 `[department_id]`，完整归属关联部门列表显示，旧单值不表示主部门；任职资料不包含在用户列表响应中。空表返回 []，数据库或数据解析故障返回脱敏 503，不伪装为空表。不请求钉钉或中间件总表，不包含只存在于知识后端开发配置中的模拟身份。复用员工仓库与现有 MySQL 配置，具体字段见[人员存储契约](../architecture/data/employee.md)，实现为 `MySQLEmployeeRepository.list_employee_records()`。
 
 ---
 
@@ -94,7 +95,7 @@ curl 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/user/department
 
 ## 刷新已有员工资料
 
-`POST /knowledge-accumulation/registry/api/user/refresh-all`，一次刷新 MySQL 已有员工的钉钉姓名、顶级部门归属和部门名称，随后仅增量同步发生变化的姓名。
+`POST /knowledge-accumulation/registry/api/user/refresh-all`，一次刷新 MySQL 已有员工的钉钉姓名、顶级部门归属、部门名称及任职资料（直属主管 userid、职位），随后增量同步本次全部目标员工的姓名和完整部门名称列表。
 
 **认证方式：** header `Authorization: Bearer <access_token>`，要求中央登录有效且具有 registry 管理权限。钉钉应用凭据只从后端配置读取，不能由调用方传入。
 
@@ -103,10 +104,10 @@ curl 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/user/department
 **成功响应：** `200 application/json`，`Cache-Control: no-store`：
 
 ```json
-{"refreshed_users":12,"refreshed_departments":3,"synced_names":2,"pending_names":0}
+{"refreshed_users":12,"refreshed_departments":3,"synced_names":12,"pending_names":0}
 ```
 
-refreshed_users是本次处理范围，refreshed_departments是不同顶级部门数，synced_names是本次确认的姓名同步数（可包含历史失败项），不等于所有员工都发生了修改。无员工时返回各项为0，不导入其他钉钉员工。
+refreshed_users是本次处理范围，refreshed_departments是不同顶级部门数，synced_names是本次确认姓名和部门同步的员工数（可包含历史失败项），不等于所有员工都发生了修改。`synced_names` 与 `pending_names` 保留旧字段名，均按姓名和部门的员工同步项计数。无员工且无历史待同步项时返回各项为 0，不导入其他钉钉员工。
 
 **错误响应：**
 
@@ -114,14 +115,14 @@ refreshed_users是本次处理范围，refreshed_departments是不同顶级部�
 | --- | --- |
 | `401` | 未登录或用户 token 失效。 |
 | `403` | 非 registry 管理员。 |
-| `409` | 同实例已有刷新执行，或员工姓名/部门在资料读取期间发生并发修改。 |
+| `409` | 同实例已有刷新执行，或员工姓名、部门或任职资料在资料读取期间发生并发修改。 |
 | `422` | 传入了 query 或请求体。 |
-| `503` | 缺少应用配置、钉钉/数据库/中间件不可用、部门无法确定、超时或姓名同步尚未完成。 |
+| `503` | 缺少应用配置、钉钉/数据库/中间件不可用、部门无法确定、超时或姓名/部门同步尚未完成。 |
 
 业务503示例：
 
 ```json
-{"detail":{"message":"数据库已更新，部分姓名尚未同步；再次刷新会重试","phase":"middleware_sync","database_updated":true,"pending_names":1}}
+{"detail":{"message":"数据库已更新，部分姓名或部门尚未同步；再次刷新会重试","phase":"middleware_sync","database_updated":true,"pending_names":1}}
 ```
 
 完整失败字段见[刷新结果契约](../architecture/data/personnel-refresh.md#成功与失败结果)。database_updated为false表示未执行MySQL变更，true表示数据库阶段已完成，null表示提交结果无法确认；不要将503统一当作数据库未更新。认证层错误沿用通用401/403/503结构。
@@ -133,7 +134,7 @@ curl --request POST 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/
   -H 'Authorization: Bearer replace-with-user-access-token'
 ```
 
-**行为与边界：** 所有员工资料通过校验后才提交单一MySQL事务，保留头像、权限和管理员关系；遇到无法读取的员工不自动删除。只有姓名变化及历史待同步项调用中间件 user/update，body精确为userid、username，不携带permissions。不调用任何full-table或登录写入接口。只变更部门时不更新中间件；失败姓名标记持久保存，下次手动刷新读取当前姓名重试。配置、部门归属、并发和恢复说明见[员工资料刷新](../capability/application/personnel-refresh.md)。
+**行为与边界：** 所有员工资料通过校验后才提交单一MySQL事务，保留头像、权限和管理员关系；遇到无法读取的员工不自动删除。本次全部目标及历史待同步项调用中间件 user/update，body为userid、username、departments，不携带permissions。不调用任何full-table或登录写入接口。部门归属变化、部门改名及中央旧资料缺部门均通过刷新同步；失败标记持久保存，下次手动刷新回读当前姓名和部门重试。配置、部门归属、并发和恢复说明见[员工资料刷新](../capability/application/personnel-refresh.md)。
 
 
 ---

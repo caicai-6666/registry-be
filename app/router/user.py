@@ -54,7 +54,7 @@ async def list_users(response: Response, repository: EmployeeRepositoryDependenc
     return users
 
 
-@router.post('/refresh-all', response_model=PersonnelRefreshResult, summary='刷新已有员工姓名与部门',
+@router.post('/refresh-all', response_model=PersonnelRefreshResult, summary='刷新已有员工姓名、部门与任职资料',
              responses={409: {'description': '已有刷新正在执行，或员工资料在读取期间被其他操作修改'},
                         422: {'description': '该接口不接受请求参数或请求体'},
                         503: {'description': '配置、钉钉、数据库或中间件同步失败；详情说明数据库提交状态'}})

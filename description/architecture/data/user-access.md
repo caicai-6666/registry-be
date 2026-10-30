@@ -16,7 +16,7 @@
 
 两个映射默认空对象，但不能同时为空；拒绝额外字段和顶层null。员工不存在时不通过该接口初始化。
 
-成功返回 `UserAccessState`，仅含userid、完整platform_permissions和按代码排序的完整managed_platforms，不返回姓名、部门、头像或token。用户列表仍保持员工表五字段契约；本接口当前状态用单表查询组合，不JOIN部门或员工展示资料。
+成功返回 `UserAccessState`，仅含userid、完整platform_permissions和按代码排序的完整managed_platforms，不返回姓名、部门、头像或token。用户列表采用[人员管理 API](../../api/user.md#获取用户列表)的六字段契约，包含完整 `department_ids`；本接口当前状态用单表查询组合，不JOIN部门或员工展示资料。
 
 ---
 
@@ -24,7 +24,7 @@
 
 MySQL仍使用现有employees与platform_admins，不增表或改DDL。事务锁定员工并核对内部读取的权限快照；仅写权限JSON和指定平台的管理员关联。JSON生成与SQL参数绑定在服务端完成，不能把客户端字典作为SQL列名或条件。未指定平台和所有个人资料保持原值。
 
-数据库提交后再发送中央请求。权限发送当前完整映射，符合中间件permissions整体替换语义；姓名字段省略。管理员增删以MySQL当前成员关系为准，不反复替换其他平台的管理员集合。
+数据库提交后再发送中央请求。权限发送当前完整映射，符合中间件permissions整体替换语义；姓名和部门字段省略，保留中央当前资料。管理员增删以MySQL当前成员关系为准，不反复替换其他平台的管理员集合。
 
 ---
 

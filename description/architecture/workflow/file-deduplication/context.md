@@ -98,7 +98,7 @@ assistant（原生思考 + finish_comparison）
 
 每轮原始 SDK 响应、用量、耗时、接受状态及反馈保存在本次会话的独立审计列表；如配置 `audit_sink`，在退出时交给调用方。纠错链清除不删除审计。默认不写文件，审计也不进入主图业务状态。
 
-每个文件对独立维护工具历史、局部页面元信息及计数，共享只读页面和模型客户端不共享会话状态。实现遵循[合同服务上下文规范](../../../../../../现象合同智能管理平台/contract-service-be/description/standard/agent-context-management.md)及[提示词规范](../../../../../../现象合同智能管理平台/contract-service-be/description/standard/prompt-engineering.md)。
+每个文件对独立维护工具历史、局部页面元信息及计数，共享只读页面和模型客户端不共享会话状态。实现遵循[Agent 上下文规范](../../../standard/agent-context-management.md)及[提示词规范](../../../standard/prompt-engineering.md)。
 
 ---
 

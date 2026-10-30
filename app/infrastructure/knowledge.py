@@ -6,6 +6,7 @@ import re
 import httpx
 
 from app.config.knowledge import KnowledgeSettings
+from app.config.api import APPLICATION_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ class KnowledgeClient:
             # 固定目标和路径，仅透传本次用户 token；不携带平台凭据、Cookie 或任意请求头。
             async with asyncio.timeout(self._settings.timeout_seconds):
                 request = self._http.build_request('GET',
-                    f'/knowledge-accumulation/api/resource/avatar/{filename}',
+                    f'{APPLICATION_PREFIX}/api/resource/avatar/{filename}',
                     headers={'Authorization': f'Bearer {access_token}'})
                 # 共享连接池不共享用户 Cookie，连上游历史 Set-Cookie 也不再次发送。
                 request.headers.pop('cookie', None)

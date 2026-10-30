@@ -22,6 +22,15 @@ python -m pip check
 conda create -n registry-be python=3.12 pip
 ```
 
+若已安装 Miniconda，但 Zsh 提示找不到 `conda`，先加载安装目录中的初始化脚本；以下为本机安装路径，其他机器需替换为实际路径：
+
+```bash
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate registry-be
+```
+
+需要在后续新终端中直接使用 `conda` 时，执行 `~/miniconda3/bin/conda init zsh`，然后重新打开终端。IDE 的 Python 解释器应选择该环境的 `~/miniconda3/envs/registry-be/bin/python`。
+
 `requirement.txt` 固定已安装并验证的直接依赖版本；新增或升级依赖时，应重新检查解析结果、导入和相关功能兼容性。
 
 ---
@@ -49,7 +58,7 @@ SQLite 引擎通过 Python 标准库 `sqlite3` 使用，无须另行安装名为
 
 ## 使用边界
 
-已提供可运行的 FastAPI 入口，启动与容器配置见 [环境配置与容器运行](runtime.md)。[入库申请接收服务](ingestion-consumer.md)将待审核申请暂存 SQLite，MySQL 保存审核通过的正式资源。[人员系统](personnel.md)提供开发者 token、钉钉 H5 免登与审核身份依赖，[人工入库审核服务](ingestion-review.md)已接入这些身份。
+已提供可运行的 FastAPI 入口，启动与容器配置见 [环境配置与容器运行](runtime.md)。[入库申请接收服务](ingestion-consumer.md)将待审核申请暂存 SQLite，MySQL 保存审核通过的正式资源。[人员系统](personnel.md)直接验证中央用户 token，管理入口另校验 registry 管理权；登录、开发固定凭据和钉钉免登由知识后端负责。[人工入库审核服务](ingestion-review.md)使用服务端确认的 userid 记录审核员。
 
 应用生命周期已接入[中间件注册与心跳](../infrastructure/middleware-session.md)，启动时登录并在后台续期，关闭时释放资源。
 

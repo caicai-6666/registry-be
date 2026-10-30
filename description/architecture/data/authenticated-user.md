@@ -1,6 +1,6 @@
 # 登录身份契约
 
-> **用途：** 描述中央用户 token 验证后的 registry 服务端身份。接口见[登录 API](../../api/auth.md)，模块与配置见[人员系统](../../capability/application/personnel.md)。
+> **用途：** 描述中央用户 token 验证后的 registry 服务端身份。接口见[当前身份 API](../../api/auth.md)，模块与配置见[人员系统](../../capability/application/personnel.md)。
 
 ---
 
@@ -21,7 +21,7 @@
 
 ## 审核与文件授权
 
-人工审核以可信 userid 写入 reviewer，历史查询默认使用当前 userid。自动审核继续使用固定名称“注册中心自动审核员”。文件访问等级与管理权独立；所有 registry 业务操作（含正式原件、平台列表和当前身份）均要求注册中心管理员，文件等级不作为本后端的放行条件，头像在知识后端读取，只要求正常登录。详见[授权依赖](../../capability/application/authorization.md)。
+人工审核以可信 userid 写入 reviewer，历史查询默认使用当前 userid。自动审核继续使用固定名称“注册中心自动审核员”。文件访问等级与管理权独立：当前身份、平台列表、审核及管理员原件入口要求 registry 管理员；独立的用户原件入口验证中央用户 token 后，按文件来源平台比较实时 SQL 权限和文件等级。可信后台原件入口验证知识后端平台 token 及任务绑定的员工权限，不使用或续期用户登录。头像在知识后端直接读取只要求正常登录，registry 头像代理仍要求管理员。详见[授权依赖](../../capability/application/authorization.md)。
 
 ---
 

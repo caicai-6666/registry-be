@@ -18,9 +18,11 @@
 
 已提供 MySQL 8.4 容器、MyVector 插件与统一部署配置，具体配置和操作步骤以部署项目文档为准。
 
-`departments`、`employees` 和 `platform_admins` 保存顶级部门、钉钉 userid、平台文件权限和管理员关系，定义见[公司部门与员工契约](../../architecture/data/employee.md)。首次钉钉员工初始化、用户及管理员全表注册均由知识后端负责；registry 查询同一权威人员源，并负责后续人员权限和管理员维护。当前查询需要上述表的 SELECT 权限，不能沿用旧的 registry 登录初始化写入流程；[员工资料刷新](../application/personnel-refresh.md)还需要 employees 的 name/department_id UPDATE 与 departments INSERT/UPDATE 权限，保留头像、文件权限和管理员关联。[用户授权管理](../application/user-access.md)需要employees.platform_permissions的UPDATE及platform_admins的INSERT/DELETE权限，不新增MySQL表。
+`departments`、`employees` 和 `platform_admins` 保存顶级部门、钉钉 userid、平台文件权限和管理员关系，定义见[公司部门与员工契约](../../architecture/data/employee.md)。首次钉钉员工初始化、用户及管理员全表注册均由知识后端负责；registry 查询同一权威人员源，并负责后续人员权限和管理员维护。当前查询需要上述表的 SELECT 权限，不能沿用旧的 registry 登录初始化写入流程；[员工资料刷新](../application/personnel-refresh.md)还需要 employees 的 name/department_id/department_ids/work_profile UPDATE 与 departments INSERT/UPDATE 权限，保留头像、文件权限和管理员关联。[用户授权管理](../application/user-access.md)需要employees.platform_permissions的UPDATE及platform_admins的INSERT/DELETE权限，不新增MySQL表。
 
 后端已提供正式资源表与只读检索连接池，待审核申请持久化由 SQLite 承担，字段约束见[注册中心资源表契约](../../architecture/data/resource.md)。建表 SQL 由 `knowledge-accumulation-deploy/mysql/init/` 维护并打包进 MySQL 镜像，在空数据目录首次启动时执行。资源仓库只初始化连接池，不执行建表；已有数据卷不会重跑脚本，当前仅保留最终版本初始化定义，不再提供历史 MySQL 迁移文件；旧结构处理边界见[资源表说明](../../architecture/data/resource.md#初始化与版本边界)。
+
+新空卷的 `003-personnel.sql` 已包含任职资料、多部门及检查约束；旧卷按[员工初始化边界](../../architecture/data/employee.md#初始化与接入边界)检查后显式迁移，不重复补列。
 
 后端已提供[服务入口与容器配置](../application/runtime.md)，并接入 Compose，等待 MySQL 健康检查通过后启动。消息中间件部署仍由对应项目维护。
 

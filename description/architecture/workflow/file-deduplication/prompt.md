@@ -41,4 +41,4 @@ python -m unittest tests.test_file_deduplication_prompt \
 
 `judge_files` 已通过运行器将本消息作为首个 system，并执行工具位置、页面窗口、已展示页和终态验收；程序不能因为提示词提出限制就跳过实际校验。
 
-提示词组织参考[合同服务提示词工程规范](../../../../../../现象合同智能管理平台/contract-service-be/description/standard/prompt-engineering.md)。
+提示词组织参考[本项目提示词工程规范](../../../standard/prompt-engineering.md)。

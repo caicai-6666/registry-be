@@ -12,10 +12,13 @@ from app.infrastructure.knowledge import AvatarProxyError
 from app.router.dependency import (
     ResourceRepositoryDependency, IngestionReviewServiceDependency,
     ReviewID, ingestion_review_error, AuthenticatedUserDependency,
+    _bearer_access_token,
 )
 from app.model.file_level import FILE_LEVEL
 from app.model.resource import StoredResource
 from app.service.review_files import ReviewFileService
+from app.schema.resource_access import ServiceFileRequest
+from app.service.service_file_auth import ServiceFileAuthError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(
@@ -34,6 +37,14 @@ reader_router = APIRouter(prefix="/resource", tags=["resource"], responses={
     403: {"description": "未获文件来源平台授权、等级不足或文件等级未知"},
     404: {"description": "正式资源或磁盘原件不存在"},
     503: {"description": "中央认证、数据库或文件读取服务不可用"},
+})
+
+
+service_router = APIRouter(prefix='/resource', tags=['resource'], responses={
+    401: {'description': '平台 Bearer 缺失、无效或过期'},
+    403: {'description': '调用平台不是 knowledge-accumulation，或目标员工文件权限不足'},
+    404: {'description': '正式资源或磁盘原件不存在'},
+    503: {'description': '平台认证、员工权限、数据库或文件服务暂不可用'},
 })
 
 
@@ -69,6 +80,11 @@ async def require_file_access(
     request: Request, user: AuthenticatedUserDependency, resource: StoredResourceDependency,
 ) -> StoredResource:
     """先确认中央身份，再按正式文件来源平台比较权威员工等级，不使用管理员旁路。"""
+    return await check_employee_file_access(request, user.userid, resource)
+
+
+async def check_employee_file_access(request: Request, userid: str, resource: StoredResource) -> StoredResource:
+    """登录下载与可信后台下载共用实时授权规则，不缓存权限，不按管理员身份放行。"""
     headers = {"Cache-Control": "no-store"}
     if resource.file_level is None:
         raise HTTPException(403, "文件等级未知，暂不允许读取", headers=headers)
@@ -77,7 +93,7 @@ async def require_file_access(
         raise HTTPException(503, "员工权限查询暂不可用", headers=headers)
     try:
         level = FILE_LEVEL.validate_python(resource.file_level)
-        permissions = await employees.find_file_permissions(user.userid)
+        permissions = await employees.find_file_permissions(userid)
     except (aiomysql.MySQLError, OSError, TimeoutError, ValueError, RuntimeError) as error:
         logger.warning("文件权限查询失败：error_type=%s", type(error).__name__)
         raise HTTPException(503, "文件权限查询暂不可用", headers=headers) from None
@@ -96,6 +112,44 @@ ReadableResourceDependency = Annotated[StoredResource, Depends(require_file_acce
                      "content": {"*/*": {"schema": {"type": "string", "format": "binary"}}}}})
 async def get_authorized_resource_file(resource: ReadableResourceDependency,
                                        files: ReviewFileServiceDependency) -> Response:
+    return await get_resource_file(resource, files)
+
+
+async def require_file_service(request: Request,
+    authorization: Annotated[str | None, Header(alias='Authorization',
+        description='知识后端的中间件平台 Bearer token；不是用户登录 token。')] = None,
+) -> None:
+    headers = {'Cache-Control': 'no-store', 'WWW-Authenticate': 'Bearer'}
+    token = _bearer_access_token(authorization)
+    if token is None:
+        raise HTTPException(401, '缺少有效的平台 Bearer 令牌', headers=headers)
+    service = getattr(request.app.state, 'service_file_auth', None)
+    if service is None:
+        raise HTTPException(503, '平台认证服务暂不可用', headers={'Cache-Control': 'no-store'})
+    try:
+        await service.authorize(token)
+    except ServiceFileAuthError as error:
+        if error.status_code != 401:
+            headers.pop('WWW-Authenticate')
+        raise HTTPException(error.status_code, str(error), headers=headers) from None
+
+
+async def require_service_file_access(
+    request: Request, body: ServiceFileRequest,
+    platform: Annotated[None, Depends(require_file_service)], resource: StoredResourceDependency,
+) -> StoredResource:
+    # 仅可信平台可声明任务所属员工；必须先认证平台，再定位资源和读取员工权限。
+    return await check_employee_file_access(request, body.userid, resource)
+
+
+@service_router.post('/service-authorized-file/{resource_id}', response_class=Response,
+    summary='可信知识后端按员工权限读取正式文件原件',
+    responses={200: {'description': '未经转换的正式原件',
+                    'content': {'*/*': {'schema': {'type': 'string', 'format': 'binary'}}}}})
+async def get_service_authorized_file(
+    resource: Annotated[StoredResource, Depends(require_service_file_access)],
+    files: ReviewFileServiceDependency,
+) -> Response:
     return await get_resource_file(resource, files)
 
 

@@ -69,7 +69,7 @@ MySQL 正式资源不保存消息 ID、offset 或来源审核员。审核通过�
 
 人工决定预留后，`reviewer`、`reviewer_note`、`reviewed_at` 及批准时的 `file_level` 已确定；存储处理完成前 `status` 仍为 `pending`。待审列表只查询 `status='pending' AND decision IS NULL`。存储完成后 `status=decision`，通过关联正式资源 ID；反馈发布完成后保存 `result_message_id`。通行证建议与最终通行证分别保存，不互相覆盖。
 
-当前中间件[入库消息](../../../../../知识沉淀中间件服务/middleware-service/description/architecture/data/ingestion-request.md)没有独立 `applicant` 字段，来源提交人位于 `reviewer`。入库 DTO 兼容历史显式 `applicant`，缺失时映射上游 `reviewer`；新待审和自动拒绝记录据此保存申请人。注册中心最终审核人仍由人员登录或自动审核身份独立确定。
+当前中间件[入库消息](../../../../middleware-service/description/architecture/data/ingestion-request.md)没有独立 `applicant` 字段，来源提交人位于 `reviewer`。入库 DTO 兼容历史显式 `applicant`，缺失时映射上游 `reviewer`；新待审和自动拒绝记录据此保存申请人。注册中心最终审核人仍由人员登录或自动审核身份独立确定。
 
 旧实现可能只写入 `source_reviewer` 而留下空 `applicant`。列表和历史使用 `COALESCE(applicant,source_reviewer)` 返回申请人，不改写记录；原消息重投仍按来源身份核对，待审重投或首次人工决定时补齐申请人，使批准后 MySQL 正式资源得到正确申请人。非空历史申请人不覆盖，已确定结论不重置；保留旧列兼容历史，不执行删列或批量迁移。
 
@@ -92,7 +92,7 @@ MySQL 正式资源不保存消息 ID、offset 或来源审核员。审核通过�
 | `passport` | 子平台提交的已有文件通行证数组，JSON 文本，每项最多 512 字符；用于核对完整集合，不生成或推荐新的通行证。 |
 | `file_url` | 正式资源的原文件名，不带斜线，最多 146 字符；从 MySQL 资源记录取得，读取根目录为 RESOURCE_ROOT（默认 data/resource）。自动拒绝且未绑定资源时为空。 |
 
-中间件的[删除申请消息契约](../../../../../知识沉淀中间件服务/middleware-service/description/architecture/data/deletion-request.md)没有来源审核员，因此删除表不包含 `source_reviewer`。`applicant` 表示本次删除申请人，`applicant_note` 表示删除原因，`reviewer` 与 `reviewer_note` 表示注册中心的最终审核人员和意见。
+中间件的[删除申请消息契约](../../../../middleware-service/description/architecture/data/deletion-request.md)没有来源审核员，因此删除表不包含 `source_reviewer`。`applicant` 表示本次删除申请人，`applicant_note` 表示删除原因，`reviewer` 与 `reviewer_note` 表示注册中心的最终审核人员和意见。
 
 新删除申请不再上传文件。消费者按平台码与 source_id 定位正式资源，核对 passport 并检查原文件存在，保存 resource_id、正式 file_url 和 file_level 快照后 ACK。原文件读取位置为 `{RESOURCE_ROOT}/{source_platform}/{file_url}`，待审核期间不复制、移动或删除。消息中的 name、abstract、uploader 在待审及自动拒绝分支首次写入本表，不用于磁盘路径或资源身份校验；重投不覆盖已保存快照。待审列表与审核历史直接从本表返回快照，不依赖 MySQL 资源是否存在。
 

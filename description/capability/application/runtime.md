@@ -15,7 +15,7 @@
 首次配置时可在项目根目录执行：
 
 ```bash
-cp .env.example .env
+test -f .env || cp .env.example .env
 chmod 600 .env
 ```
 
@@ -44,7 +44,7 @@ Dockerfile 只复制依赖文件与 `app/`，运行数据仍通过挂载持久�
 
 | 变量 | 示例值 | 用途 |
 | --- | --- | --- |
-| `AUTH_REQUEST_TIMEOUT_SECONDS` | `5` | 中央用户 token 查询总超时。 |
+| `AUTH_REQUEST_TIMEOUT_SECONDS` | `5` | 中央用户查询、管理员查询及服务间平台令牌校验的单次总超时。 |
 | `MYSQL_HOST` | `127.0.0.1` | 本机开发使用的数据库地址。 |
 | `MYSQL_PORT` | `3306` | MySQL 连接端口。 |
 | `MYSQL_DATABASE` | `registry` | 业务数据库名称。 |
@@ -57,6 +57,8 @@ Dockerfile 只复制依赖文件与 `app/`，运行数据仍通过挂载持久�
 
 MySQL 连接参数用于正式资源查询、入库与删除接收中的资源核对，以及人工批准后的正式写入。[正式文件目录 API](../../api/catalog.md)可在关闭后台消费时独立使用，首次请求时建立连接。[SQLite 基础设施](../infrastructure/sqlite.md)在应用启动时初始化两张审核表，入库接收与工作流会在 ACK 前保存审核记录；[人工入库审核服务](ingestion-review.md)与[人工删除审核服务](deletion-review.md)保存决定并恢复未完成处理，关闭消息消费也可审核已有申请。OpenAI 配置预留给后续功能。MySQL 超时配置以[数据库连接说明](../infrastructure/mysql.md#后端连接配置)为准。
 
+配置模块通常按“进程环境优先于项目根目录 `.env`”加载，且关闭值插值。`APP_PATH_PREFIX` 是路由导入时读取的进程环境变量：直接执行入口设置 `/dev`，统一 Compose 固定为空，不依赖在 `.env` 中声明该变量。修改任一配置后重启服务。
+
 用户在知识后端完成登录，registry 通过[中央用户认证](../infrastructure/middleware-user.md)直接查询用户 token。用户及管理员总表均由知识后端发布，registry 无总表同步开关；缺少平台会话或查询故障返回 503，不使用本地开发凭据放行。
 
 中间件注册与心跳已接入应用启动流程，其配置由[中间件注册与心跳](../infrastructure/middleware-session.md)统一维护，并在启动时从进程环境或项目根目录 `.env` 读取。
@@ -67,7 +69,9 @@ MySQL 连接参数用于正式资源查询、入库与删除接收中的资源�
 
 ---
 
-头像的保存、读取及 `AVATAR_*` 配置已迁至知识后端；registry 不再装配头像存储服务，仅提供[HTTP 头像代理](../infrastructure/avatar.md)，通过 KNOWLEDGE_ACCUMULATION_BASE_URL 配置服务根地址及端口。员工资料继续只返回头像文件名，目录迁移见[头像迁移说明](../infrastructure/avatar.md)。
+## 头像代理配置
+
+头像的保存、读取及 `AVATAR_*` 配置已迁至知识后端；registry 不再装配头像存储服务，仅提供[HTTP 头像代理](../infrastructure/avatar.md)，通过 `KNOWLEDGE_ACCUMULATION_BASE_URL` 配置服务根地址及端口。员工资料继续只返回头像文件名，目录迁移见[头像迁移说明](../infrastructure/avatar.md)。
 
 ---
 
@@ -79,9 +83,9 @@ DINGTALK_APP_KEY、DINGTALK_APP_SECRET 是本项目手动刷新通讯录使用�
 
 ## 业务路由入口
 
-`app/router/user.py` 已接入带管理员认证的业务路由组，完整前缀为 `/knowledge-accumulation/registry/api/user`。已提供[用户列表](../../api/user.md#获取用户列表)和[部门列表接口](../../api/user.md#获取部门列表)，通过组合根共用员工仓库读取已登记部门；不承担知识后端的登录或用户总表注册。
+`app/router/user.py` 已接入带管理员认证的业务路由组，完整前缀为 `/knowledge-accumulation/registry/api/user`。提供[用户列表](../../api/user.md#获取用户列表)、[部门列表](../../api/user.md#获取部门列表)、[资料刷新](../../api/user.md#刷新已有员工资料)及[授权维护](../../api/user.md#更新用户权限与管理员关系)，通过组合根共用员工仓库；不承担知识后端的登录或用户总表注册。
 
-业务 API 统一使用 `/knowledge-accumulation/registry/api` 前缀，由 `app/config/api.py` 中的 `API_PREFIX` 定义；所有业务路由共用该值。身份中的 `avatar_url` 只返回文件名，读取头像时由调用方拼接 resource 头像接口路径。反向代理应将完整路径原样转发到后端，不剥离 `/knowledge-accumulation`。本机直连同样使用该前缀；旧的短路径不再注册。
+生产业务前缀为 `/knowledge-accumulation/registry/api`，IDE 直接启动前缀为 `/dev/knowledge-accumulation/registry/api`，两者由 `app/config/api.py` 的 `API_PREFIX` 根据进程环境确定。所有业务路由共用该值，反向代理须保留运行方式对应的完整路径。用户列表和平台管理员资料中的 `avatar_url` 只返回文件名，`/auth/me` 不包含头像字段；头像通过知识后端直接入口或 registry 管理员代理读取。
 
 OpenAPI 和 Swagger 入口继续为 `/openapi.json`、`/docs`，Docker 健康检查无需调整。具体业务路径见 [API 参考](../../api/readme.md)。
 
@@ -98,14 +102,14 @@ conda activate registry-be
 python app/main.py
 ```
 
-也可以在 IDE 中直接运行 `app/main.py`，或执行 `python -m app.main`。文件内启动使用单个 worker，监听 `127.0.0.1:23000`，默认开启代码热重载；通过 `app.main:app` 导入字符串加载应用，显式监控 `app/`，不依赖 IDE 的工作目录。应用装配当前认证模块、中间件注册、心跳、平台目录刷新、入库与删除接收、人工入库与删除审核恢复及停机清理生命周期；直接运行文件时按文件位置确定项目导入路径。
+也可以在 IDE 中直接运行 `app/main.py`，或执行 `python -m app.main`。文件内启动设置 `APP_PATH_PREFIX=/dev`，业务接口为 `/dev/knowledge-accumulation/registry/api`；头像代理沿用相同开发前缀。Docker/ASGI 默认仍使用生产路径。文件内启动使用单个 worker，监听 `127.0.0.1:16000`，默认开启代码热重载；通过 `app.main:app` 导入字符串加载应用，显式监控 `app/`，不依赖 IDE 的工作目录。应用装配当前认证模块、中间件注册、心跳、平台目录刷新、入库与删除接收、人工入库与删除审核恢复及停机清理生命周期；直接运行文件时按文件位置确定项目导入路径。
 
-应用自行读取 `.env` 配置，入口为 `app/main.py` 中的 `app` 对象。直接启动时浏览器访问 `http://127.0.0.1:23000/docs` 查看接口文档，`http://127.0.0.1:23000/openapi.json` 返回当前应用 Schema。
+应用自行读取 `.env` 配置，入口为 `app/main.py` 中的 `app` 对象。直接启动时浏览器访问 `http://127.0.0.1:16000/docs` 查看接口文档，`http://127.0.0.1:16000/openapi.json` 返回当前应用 Schema。
 
 也可以通过命令行开启自动重载：
 
 ```bash
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+APP_PATH_PREFIX=/dev python -m uvicorn app.main:app --host 127.0.0.1 --port 16000 --reload
 ```
 
 代码自动重载会执行应用关闭和重新启动，并重新登录，可能需要等待旧中间件会话过期；中央用户 token 不因 registry 重启自行失效。`.env` 不在默认 Python 文件监控范围，修改后仍需手动重启。容器入口使用不带 reload 的 Uvicorn 命令。
@@ -122,6 +126,9 @@ docker run -d --name registry-be-dev \
   --network registry_registry \
   --env-file .env \
   -e MYSQL_HOST=mysql \
+  -e MYSQL_PORT=3306 \
+  -e APP_PATH_PREFIX= \
+  -e KNOWLEDGE_ACCUMULATION_BASE_URL=http://knowledge-backend:8000 \
   -e MIDDLEWARE_BASE_URL=http://host.docker.internal:22000 \
   -p 127.0.0.1:8000:8000 \
   -v registry-backend-data:/workspace/data \
@@ -130,7 +137,7 @@ docker run -d --name registry-be-dev \
 
 容器内 Uvicorn 固定监听 `0.0.0.0:8000`。环境变量在运行时注入，`.env` 不复制进镜像；镜像不再设置已迁出的 `APP_ENV` 登录模式。
 
-中间件与数据库配置由环境变量注入，无需人员名单挂载；不恢复开发登录或本地头像存储配置；通讯录刷新和头像代理按对应专题配置。管理请求校验中央 token 和注册中心管理员，独立的普通用户正式原件入口校验中央 token 与来源平台文件等级。
+中间件与数据库配置由环境变量注入，无需人员名单挂载；不恢复开发登录或本地头像存储配置；通讯录刷新和头像代理按对应专题配置。管理请求校验中央 token 和注册中心管理员，普通用户原件入口校验中央 token 与来源平台文件等级；可信后台入口校验知识后端平台 token 与任务员工的实时权限，超时同样复用 `AUTH_REQUEST_TIMEOUT_SECONDS`。
 
 上述 Docker 命令直接读取 `KEY=value`。本地 `.env` 使用无外围引号的值，保证本机配置读取与 Docker 一致；Docker `--env-file` 不会按 dotenv 规则去除引号。
 
@@ -153,11 +160,13 @@ docker logs -f registry-be-dev
 
 ## 与统一部署的关系
 
-后端已加入 `knowledge-accumulation-deploy` 的 Compose `backend` 服务，构建上下文为 `../registry-be`，数据库连接固定为 `mysql:3306`，等待 MySQL 健康检查通过后启动。运行配置读取 `registry-be/.env` 并由部署环境覆盖数据库及容器目录。
+后端已加入 `knowledge-accumulation-deploy` 的 Compose `backend` 服务，构建上下文为 `../registry-be`，数据库连接固定为 `mysql:3306`，等待 MySQL 健康检查通过后启动。运行配置由部署 `REGISTRY_BACKEND_ENV_FILE` 指定（默认 `../registry-be/.env`，相对部署目录），按 raw 模式注入，并由部署环境覆盖数据库、容器目录及空的 `APP_PATH_PREFIX`，确保容器生产路径不带 `/dev`。
 
-Compose 使用 `backend-data:/workspace/data` 持久化运行数据，认证配置从后端 `.env` 原样注入，无需人员文件。完整准备与启动步骤见[统一部署说明](../../../../knowledge-accumulation-deploy/readme.md#管理员认证与人员数据)。该方式与上面的手工 `docker run` 示例分别使用独立数据卷，不会自动互相迁移数据。
+Compose 使用 `backend-data:/workspace/data` 持久化运行数据，认证配置从 `REGISTRY_BACKEND_ENV_FILE` 指定的文件原样注入，无需人员文件。完整准备与启动步骤见[统一部署说明](../../../../knowledge-accumulation-deploy/readme.md#管理员认证与人员数据)。该方式与上面的手工 `docker run` 示例分别使用独立数据卷，不会自动互相迁移数据。
 
-Compose 还覆盖 `KNOWLEDGE_ACCUMULATION_BASE_URL`，默认通过 `http://host.docker.internal:24000` 访问宿主机知识后端；可在部署 `.env` 改为实际可达的地址。头像超时、大小和缓存时长，以及钉钉通讯录刷新配置，继续从后端 `.env` 读取。
+Compose 还覆盖 `KNOWLEDGE_ACCUMULATION_BASE_URL`，默认通过同一网络的 `http://knowledge-backend:8000` 访问知识后端；可在部署 `.env` 改为实际可达的地址。头像超时、大小和缓存时长，以及钉钉通讯录刷新配置，继续从 `REGISTRY_BACKEND_ENV_FILE` 读取。
+
+Compose 同时提供 `registry-frontend` 服务（默认宿主机端口 `23080`），容器内 Nginx 直接向 `backend:8000` 转发完整生产 API 路径。前端与知识入口需要外层网关提供同源访问，详见[统一部署说明](../../../../knowledge-accumulation-deploy/readme.md#注册中心前端)。
 
 容器内的 `127.0.0.1` 指向后端容器自身，不能直接使用本机开发的 MySQL 地址连接其他容器。宿主机知识后端必须监听容器可达的接口；仅监听 `127.0.0.1` 在部分部署环境中不可达。
 

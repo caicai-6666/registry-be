@@ -1,6 +1,6 @@
 # 文件原件与头像 API
 
-`resource` 路由负责读取正式存储的文件内容，文件基本信息列表见[正式文件目录 API](catalog.md)。本接口支持 PDF、图片、Office 文档及其他已保存的附件类型。
+`resource` 路由负责读取正式存储的文件内容，文件基本信息列表见[正式文件目录 API](catalog.md)。本接口支持 PDF、图片、Office 文档及其他已保存的附件类型。下列路径和示例使用生产前缀与 Compose 端口 `23000`；直接执行 `python app/main.py` 时使用端口 `16000`，并在业务路径前加 `/dev`。
 
 ## 接口目录
 
@@ -10,6 +10,7 @@
 | [按 ID 获取正式文件原件](#按-id-获取正式文件原件) | `GET` | `/knowledge-accumulation/registry/api/resource/file/{resource_id}` |
 | [按审核 ID 获取待入库文件原件](#按审核-id-获取待入库文件原件) | `GET` | `/knowledge-accumulation/registry/api/resource/ingestion/{review_id}` |
 | [按用户权限获取正式文件原件](#按用户权限获取正式文件原件) | `GET` | `/knowledge-accumulation/registry/api/resource/authorized-file/{resource_id}` |
+| [可信后台代用户获取正式文件原件](#可信后台代用户获取正式文件原件) | `POST` | `/knowledge-accumulation/registry/api/resource/service-authorized-file/{resource_id}` |
 
 ---
 
@@ -55,7 +56,7 @@ curl --fail 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/resource
 
 必须先通过中央用户登录验证，再确认为注册中心当前平台（默认 `registry`）管理员。文件访问等级不能绕过管理员校验。
 
-携带 `Authorization: Bearer <access_token>`，使用知识后端签发的用户 token；可通过[当前身份接口](auth.md#获取当前身份)查询资料。中间件 access_token 不能用于此接口。
+携带 `Authorization: Bearer <access_token>`，使用知识后端签发的用户 token；可通过[当前身份接口](auth.md#获取当前身份)查询资料。中间件平台 access_token 不能用于此接口。
 
 ### 请求参数
 
@@ -112,7 +113,7 @@ X-Content-Type-Options: nosniff
 
 ### 请求示例
 
-替换资源 ID 与用户 token；本地直接启动默认端口为 `23000`。保存路径由调用方自行选择，不要求与服务端附件名一致。
+替换资源 ID 与用户 token；示例使用 Compose 后端默认端口 `23000`。保存路径由调用方自行选择，不要求与服务端附件名一致。
 
 ```bash
 curl --fail 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/resource/file/123' \
@@ -130,7 +131,7 @@ curl --fail 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/resource
 
 媒体类型根据后缀推断，不校验文件实际格式。若后缀表示 gzip 等传输编码，则以 `application/octet-stream` 返回压缩原件，不添加 `Content-Encoding` 让客户端自动解压。未知后缀可以正常下载。
 
-读取业务不依赖平台存活或后台消费开关；启用中间件后的登录认证仍需中央会话有效；等级条件不足时还需中间件管理员查询可用，与目录接口共用生命周期管理的 MySQL 仓库。待审核入库文件尚无正式资源 ID，使用下述审核 ID 接口读取；最终删除后，资源移除或正式原件已迁走时返回 `404`。
+读取业务不依赖文件来源平台存活或后台消费开关，但始终要求中央登录及 registry 管理员查询可用，与目录接口共用生命周期管理的 MySQL 仓库。待审核入库文件尚无正式资源 ID，使用下述审核 ID 接口读取；最终删除后，资源移除或正式原件已迁走时返回 `404`。
 
 ---
 
@@ -140,7 +141,7 @@ curl --fail 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/resource
 
 ### 认证方式
 
-此外必须具有注册中心当前平台（默认 `registry`）的管理权限，文件访问等级不能替代管理权限。
+必须具有注册中心当前平台（默认 `registry`）的管理权限，文件访问等级不能替代管理权限。
 
 携带人员登录取得的 `Authorization: Bearer <access_token>`，中间件令牌不用于此接口。
 
@@ -187,7 +188,7 @@ MP3 为 `audio/mpeg`，MP4 为 `video/mp4`，其他类别遵循正式原件接�
 
 ### 请求示例
 
-替换审核 ID 与用户 token，本地默认端口为 `23000`。
+替换审核 ID 与用户 token；示例使用 Compose 后端默认端口 `23000`。
 
 ```bash
 curl --fail 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/resource/ingestion/12' \
@@ -202,23 +203,6 @@ curl --fail 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/resource
 仅从 SQLite 的 `pending` 且未确定 `decision` 的申请定位附件，读取根目录为 `REVIEW_LOG_ROOT/tmp-file/ingestion`。不查询 MySQL，不回退到 resource 或删除保留目录。读取沿用安全平台名、附件名、目录句柄和文件大小限制，不修改原件。
 
 同一进程内与该申请的审核处理共用锁。审批完成后，待审接口返回 `409`；通过时改用正式 `resource_id` 拉取原件，拒绝附件保留但此接口不提供历史审核附件访问。
-
----
-
-## 验证
-
-```bash
-python -m unittest tests.test_resource_api tests.test_catalog_api
-```
-
-测试使用真实 PDF 样本与隔离文件目录，所有临时数据位于 `tests/tmp` 并自动清理。覆盖文件等级足够仍拒绝普通用户、管理员放行、管理员查询故障、授权前不查询资源和读取文件，以及原件字节一致性、多类型媒体头、未知类型、人员认证、ID 范围、跨平台同名、缺失原件、暂存目录隔离、符号链接、路径校验及错误脱敏。隔离 MySQL 测试验证仅 SELECT 权限下按主键精确定位、主键上限及旧查询兼容。
-
----
-
-## 员工头像迁移
-
-头像读取已迁至 `knowledge-accumulation-be` 的 `GET /knowledge-accumulation/api/resource/avatar/{filename}`，仅要求正常中央用户登录；registry 的旧头像入口已移除并返回 404。用户身份与平台管理员资料中的 `avatar_url` 继续只返回文件名，由调用方拼接新接口地址。本项目不再装配头像文件服务或读取 `AVATAR_*` 配置。
-
 
 ---
 
@@ -277,3 +261,75 @@ curl --fail-with-body \
 权限判断为：必须显式存在 `platform_permissions[resource.source_platform]`，且该等级大于或等于 `resources.file_level`。显式 0 可以读取等级 0 的文件，缺键不会默认成 0；其他平台的等级与所有管理员关系均不能用于此入口旁路授权。每次请求读取当前 MySQL 权限和文件等级，不采用登录时附带的旧权限副本。
 
 只查询 MySQL 正式资源，并从 `RESOURCE_ROOT/<source_platform>/<file_url>` 安全读取；不读取待审或删除保留目录。原有 `/resource/file/{resource_id}` 仍为管理员下载入口；本接口不开放文件列表、审核记录或其他管理功能。
+
+
+---
+
+## 可信后台代用户获取正式文件原件
+
+`POST /knowledge-accumulation/registry/api/resource/service-authorized-file/{resource_id}`，供知识后端助理机器人和定时任务在无用户登录 token 时，按任务所属员工当前文件权限读取正式原件。
+
+**认证方式：** header `Authorization: Bearer <knowledge-platform-access-token>`，必须是中间件签发给 `knowledge-accumulation` 的当前平台令牌。registry 使用自身平台令牌调用 `POST /middleware-service/api/platform/token/verify`，只读验证传入令牌并确认平台代号。验证不续期调用方、registry 或用户会话；不使用 heartbeat，不缓存认证结果，不要求用户登录或 registry 管理权。
+
+**请求参数：** path `resource_id` 必填，为正式资源 MySQL ID（正整数，最大18446744073709551615，非 source_id）；无业务 query 参数；JSON body 仅含必填 `userid`：
+
+```json
+{"userid":"employee-001"}
+```
+
+userid为1—128字符的严格字符串，区分大小写，不能空白或含首尾空白。额外body字段返回422。知识后端必须从可信任务/助理上下文绑定userid，不得让模型或未经验证的外部请求选择他人身份；平台身份和权限不能从body声明。userid本身不构成下载凭据。
+
+**成功响应：** `200`，响应体为未经转换的原件二进制，媒体类型按附件后缀推断，未知或压缩类型为 `application/octet-stream`；携带 `Content-Disposition: attachment; filename="<file_url>"`、`Content-Length`、`Cache-Control: no-store`、`X-Content-Type-Options: nosniff`。例如：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/pdf
+Cache-Control: no-store
+Content-Disposition: attachment; filename="original.pdf"
+
+<PDF 原始字节>
+```
+
+**错误响应：**
+
+| 状态码 | 条件 |
+| --- | --- |
+| `401` | 调用方平台Bearer缺失、格式错误，或中间件确认目标令牌无效/过期/被替换；用户token不能替代平台token。携带 `WWW-Authenticate: Bearer`。 |
+| `403` | 有效调用平台不是 knowledge-accumulation；或员工不存在、缺少文件来源平台授权、等级不足、文件等级未知。 |
+| `404` | 正式资源或磁盘原件不存在。 |
+| `422` | 资源ID、userid或body字段不合法。 |
+| `503` | registry平台会话未就绪、中间件校验不可用或响应非法、员工权限/数据库/文件服务故障。 |
+
+错误正文沿用 `{"detail":"脱敏说明"}`，业务错误携带no-store。只读校验上游401表示registry自身令牌失效，下载返回503并仅失效本次registry令牌，由既有会话任务恢复；不能将其解释为调用方401。中间件403、404（未部署接口）、超时和非法响应均失败关闭，不改用其他认证方式。
+
+**请求示例：**
+
+```bash
+curl --request POST 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/resource/service-authorized-file/1' \
+  -H 'Authorization: Bearer replace-with-knowledge-platform-access-token' \
+  -H 'Content-Type: application/json' \
+  --data '{"userid":"employee-001"}' \
+  --output original.pdf
+```
+
+**行为与边界：** 平台认证成功后定位正式资源，再从权威MySQL员工行实时读取 `platform_permissions`，只比较资源实际来源平台的等级与当前file_level。显式0与缺键不同，其他平台等级和管理员身份均不能旁路。每次下载重新鉴权，权限撤销、文件等级调整在下一次请求生效；不保证校验完成后正在传输的响应可撤回。授权成功后复用安全原件读取，不读取待审核或删除保留目录，不接收磁盘路径/任意URL，不返回令牌。原有用户Bearer GET入口及管理员入口保留各自鉴权。
+
+依赖中间件部署只读平台校验接口及registry现有平台会话，无新增共享密钥或环境变量。实现与验证见[服务间正式文件授权](../capability/application/authorization.md#服务间正式文件授权)。
+
+---
+
+## 头像存储边界
+
+头像由知识后端存储，直接读取入口为 `GET /knowledge-accumulation/api/resource/avatar/{filename}`，要求有效中央用户登录。registry 保留本文的管理员专用代理，不保存头像、不读取旧 `AVATAR_*` 存储配置。用户列表与平台管理员资料仅返回文件名，`/auth/me` 只返回 userid 和 username。迁移与代理配置见[头像存储边界](../capability/infrastructure/avatar.md)。
+
+---
+
+## 验证
+
+仅在另备本地测试文件的环境执行：
+
+```bash
+python -m unittest tests.test_resource_api tests.test_catalog_api tests.test_authorized_resource tests.test_service_authorized_file
+```
+
+管理员入口覆盖普通用户拒绝、依赖故障和授权前不读取文件；用户及可信后台入口分别覆盖 token 类型、实时权限、来源平台隔离、显式 0、未知等级及撤权。原件读取覆盖字节一致性、媒体类型、ID 范围、缺失原件、暂存隔离、符号链接、路径及错误脱敏。测试采用隔离替身和 `tests/tmp/`，不连接业务服务、不写 `data/`；真实部署还需验证中间件只读平台令牌接口及网络连通性。

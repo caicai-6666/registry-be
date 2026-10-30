@@ -8,6 +8,7 @@ if __name__ == "__main__" and not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from contextlib import AsyncExitStack, asynccontextmanager
+import os
 
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -31,6 +32,8 @@ from app.repository.file_level_adjustment import SQLiteFileLevelAdjustmentReposi
 from app.service.file_level_adjustment import FileLevelAdjustmentService
 from app.router.catalog import router as catalog_router
 from app.router.resource import router as resource_router, reader_router as resource_reader_router
+from app.router.resource import service_router as resource_service_router
+from app.service.service_file_auth import ServiceFileAuth
 from app.router.ingestion_review import router as ingestion_review_router
 from app.router.deletion_review import router as deletion_review_router
 
@@ -103,6 +106,7 @@ def create_app(
         application.state.personnel_refresh_service = None
         application.state.user_access_service = None
         application.state.file_level_adjustment_service = None
+        application.state.service_file_auth = None
         # 后注册的依赖先关闭；启动中途失败也按同样顺序清理已创建的资源。
         async with AsyncExitStack() as resources:
             knowledge = knowledge_settings or load_knowledge_settings()
@@ -147,6 +151,8 @@ def create_app(
             application.state.platform_admin_service = platform_admins
             resources.push_async_callback(platform_admins.close)
             application.state.auth_service = AuthService(service, client,
+                timeout_seconds=authorization.request_timeout_seconds)
+            application.state.service_file_auth = ServiceFileAuth(service, client,
                 timeout_seconds=authorization.request_timeout_seconds)
             # 消费和人工审核共用认证、HTTP 连接与正式资源仓库；文件申请只有最终批准才写入正式资源。
             database = None
@@ -216,7 +222,7 @@ def create_app(
             yield
 
     application = FastAPI(title="知识沉淀注册中心后端", version="0.1.0", lifespan=lifespan)
-    # 管理业务共用管理员边界；正式文件的普通用户读取入口单独声明文件授权依赖。
+    # 管理业务共用管理员边界；用户和可信后台下载分别显式验证身份，再按文件权限授权。
     api = APIRouter(prefix=API_PREFIX, dependencies=[Depends(require_platform_admin)], responses={
         401: {'description': '用户 token 缺失、无效或已过期'},
         403: {'description': '用户不是注册中心管理员'},
@@ -227,6 +233,7 @@ def create_app(
         api.include_router(router)
     application.include_router(api)
     application.include_router(resource_reader_router, prefix=API_PREFIX)
+    application.include_router(resource_service_router, prefix=API_PREFIX)
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(request, exc):
@@ -245,6 +252,8 @@ if __name__ == "__main__":
 
     import uvicorn
 
+    # 重载子进程继承开发前缀，路由与知识后端头像代理保持一致。
+    os.environ["APP_PATH_PREFIX"] = "/dev"
     # 热重载必须使用模块导入字符串；显式监控 app，兼容 IDE 的不同工作目录。
-    uvicorn.run("app.main:app", host="127.0.0.1", port=23000, reload=True,
+    uvicorn.run("app.main:app", host="127.0.0.1", port=16000, reload=True,
                 reload_dirs=[str(Path(__file__).resolve().parent)])

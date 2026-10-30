@@ -53,7 +53,9 @@ python scripts/file_deduplication_trial.py --cases exact-single --concurrency 1
 
 ## 首次实测与限制
 
-2026-10-13 使用配置的 `qwen38-flash-next`、开启思考及 `xhigh` 参数，九个用例全部完成并符合预期，无协议拒绝。五页正反例均实际展示全部 B 页面，反例还重开前两页；单用例 6.280—18.358 秒，中位数 7.956 秒。详见[九用例分析](../../../experiment/file-deduplication/20261013-154204-651110/analysis.md)与[单用例试跑](../../../experiment/file-deduplication/20261013-154123-020741/analysis.md)。
+下述数字保留历史实测记录；对应报告与样本不随 Git 交付，当前检出不能据此独立复核，需另备完整本地产物。
+
+2026-10-13 使用配置的 `qwen38-flash-next`、开启思考及 `xhigh` 参数，九个用例全部完成并符合预期，无协议拒绝。五页正反例均实际展示全部 B 页面，反例还重开前两页；单用例 6.280—18.358 秒，中位数 7.956 秒。详见九用例分析（本地 `experiment/file-deduplication/20261013-154204-651110/analysis.md`）与单用例试跑（本地 `experiment/file-deduplication/20261013-154123-020741/analysis.md`）。
 
 这是一组有意选择的小样本，不代表总体准确率；不可读页、真实重扫、修订和长附件仍需进一步标注验证。非零思考 token 证明实际开启思考，不能单独证明服务端如何解释 `xhigh`。客户端工具锚点已传入，但服务端工具块的实际 token 位置仍未独立检查。
 
@@ -63,4 +65,4 @@ python scripts/file_deduplication_trial.py --cases exact-single --concurrency 1
 
 2026-10-13 修改循环以持续保留全部已接受动作的原生思考，重新运行九个用例，boolean 均符合预期。逐轮检查后续 assistant 中的完整思考与先前 SDK 响应一致，且 B 图像窗口仍不超过 3 页。服务端 `/tokenize` 对照证明：当前接口仅传 `reasoning_content` 会丢失原文；同时传 `reasoning` 与 `reasoning_content`，并开启 `preserve_thinking=true`，已验证原文实际进入 token 序列。
 
-结果及兼容性发现见[原生思考保留分析](../../../experiment/file-deduplication/20261013-155524-119987/analysis.md)。布尔结论正确仍不代表反馈细节全部正确；本次同模板反例有日期误读，已在该报告单独记录。
+结果及兼容性发现见原生思考保留分析（本地 `experiment/file-deduplication/20261013-155524-119987/analysis.md`）。布尔结论正确仍不代表反馈细节全部正确；本次同模板反例有日期误读，已在该报告单独记录。

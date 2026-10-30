@@ -1,6 +1,6 @@
 # 中间件注册与心跳
 
-本模块在后端启动时与 `middleware-service` 建立注册中心平台会话，并在运行期间通过心跳续期。对外契约以中间件项目的[平台认证 API](../../../../../知识沉淀中间件服务/middleware-service/description/api/platform.md)为准。
+本模块在后端启动时与 `middleware-service` 建立注册中心平台会话，并在运行期间通过心跳续期。对外契约以中间件项目的[平台认证 API](../../../../middleware-service/description/api/platform.md)为准。
 
 > **注册边界：** 此处注册指白名单平台使用密钥登录并建立活跃会话，不会新增或修改中间件的平台白名单。
 

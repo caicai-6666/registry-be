@@ -1,6 +1,6 @@
 # 平台目录内存契约
 
-本契约描述注册中心缓存的公开平台信息及其时效元信息。数据来自中间件[查询所有平台接口](../../../../../知识沉淀中间件服务/middleware-service/description/api/platform.md#查询所有平台)，不落盘到 MySQL 或 SQLite。
+本契约描述注册中心缓存的公开平台信息及其时效元信息。数据来自中间件[查询所有平台接口](../../../../middleware-service/description/api/platform.md#查询所有平台)，不落盘到 MySQL 或 SQLite。
 
 ---
 

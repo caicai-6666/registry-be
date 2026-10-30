@@ -126,7 +126,7 @@ source_id 或理由缺失时不发布；完整 note 超过中间件 10000 字符
 
 发布失败、503、非法响应或 409 均不 ACK。当前 409 无法证明此前反馈内容与本次拒绝一致，不能直接当作发布成功；SQLite 已保存反馈消息 ID 时，重投复用拒绝意见直接 ACK；发布成功但凭据保存失败的窗口仍需中间件支持。401 会失效本次使用的会话令牌。
 
-接口依据中间件的[审核反馈接口](../../../../../../知识沉淀中间件服务/middleware-service/description/api/ingestion-review.md)。
+接口依据中间件的[审核反馈接口](../../../../../middleware-service/description/api/ingestion-review.md)。
 
 ---
 

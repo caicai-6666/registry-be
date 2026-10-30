@@ -33,4 +33,4 @@
 
 分析请求的完整记录追加到该次运行的 `analysis.md`，以带时区时间作为二级标题，记录分析范围、结论摘要、关键证据、原因判断、建议措施和验证状态。相邻章节使用 `---` 分隔；已有原始产物保持不变，只追加分析记录，不将推断写回原始结果。
 
-项目开发要求见 [AGENTS.md](../../AGENTS.md)，实验入口见 [experiment/readme.md](../../experiment/readme.md)。
+项目开发要求见 [AGENTS.md](../../AGENTS.md)，实验入口见 experiment/readme.md（本地 `experiment/readme.md`）。

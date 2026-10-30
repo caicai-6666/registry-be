@@ -1,6 +1,7 @@
 """认证后统一使用的服务器端员工身份。"""
 
 from typing import Annotated
+from app.model.department import DepartmentInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -10,6 +11,7 @@ class AuthenticatedUser(BaseModel):
 
     userid: str = Field(min_length=1, max_length=128, strict=True, description="中间件验证用户 token 后返回的可信员工 userid。")
     name: str | None = Field(default=None, max_length=200, description="身份验证时为中央 username；员工仓库映射时为员工姓名。")
+    departments: list[DepartmentInfo] = Field(default_factory=list, description='完整一级部门列表，各部门为并列归属。')
     department_id: int | None = Field(default=None, ge=0, description="员工所属的顶级部门 ID。")
     department_name: str | None = Field(default=None, max_length=200, description="顶级部门名称。")
     avatar_url: str | None = Field(default=None, pattern=r'^[a-f0-9]{32}\.webp$',

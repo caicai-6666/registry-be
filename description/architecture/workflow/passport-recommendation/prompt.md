@@ -96,7 +96,7 @@ result = PassportGroupJudgment.model_validate_json(
 
 默认路径为整个任务创建一个共享 MLLM 客户端，待全部组完成或取消退出后关闭；显式注入的客户端由调用者关闭。组内请求互不继承历史，模型可见文本不插入通行证身份或工程标识。
 
-提示词组织参照[合同服务提示词工程规范](../../../../../../现象合同智能管理平台/contract-service-be/description/standard/prompt-engineering.md)，整体结构见[推荐子图](readme.md)。
+提示词组织参照[本项目提示词工程规范](../../../standard/prompt-engineering.md)，整体结构见[推荐子图](readme.md)。
 
 ---
 

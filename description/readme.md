@@ -1,6 +1,6 @@
 # 项目文档导航
 
-本文提供知识沉淀注册中心后端的统一文档入口，后续专题文档将在创建时补充到此处。
+本文提供知识沉淀注册中心后端的统一文档入口，按开发、接口接入、数据契约和运行能力查找当前实现。
 
 ---
 
@@ -10,7 +10,10 @@
 - [项目总览](project.md)：了解项目定位、基本职责、核心术语和总体业务流程。
 - [文档撰写风格手册](documentation.md)：了解文档归档、命名、排版与维护要求。
 - [版本管理范围](capability/application/runtime.md#版本管理范围)：了解部署文件、描述文档、目录占位与本地产物的交付边界。
+- [提示词工程规范](standard/prompt-engineering.md)：任务边界、模型可见信息、实际工具 Schema 字段描述和验证要求。
+- [多轮 Agent 上下文与记忆管理规范](standard/agent-context-management.md)：连续纠错清理、权威状态、合法历史和私有审计隔离。
 - [测试与实验产物规范](standard/experiment.md)：了解测试、实验和真实运行数据的目录边界。
+- [统一部署说明](../../knowledge-accumulation-deploy/readme.md)：registry 前后端、知识后端与共享 MySQL 的配置和启动。
 
 ---
 
@@ -30,11 +33,8 @@
 ## 应用能力
 
 - [用户文件权限与平台管理员变更](capability/application/user-access.md)：增量更新文件等级和管理关系，先提交本地再即时同步中间件。
-
-- [已有员工资料手动刷新](capability/application/personnel-refresh.md)：配置钉钉应用，刷新姓名和部门，并持久重试姓名增量同步。
-
-- [登录与平台管理依赖](capability/application/authorization.md)：了解登录与当前平台管理员校验；管理员总表由知识后端发布。
-
+- [已有员工资料手动刷新](capability/application/personnel-refresh.md)：配置钉钉应用，刷新姓名、部门及任职资料，并持久重试姓名和全部部门名称的增量同步。
+- [登录与平台管理依赖](capability/application/authorization.md)：了解管理接口、用户原件和可信后台原件三类授权；管理员总表由知识后端发布。
 - [人工删除审核服务](capability/application/deletion-review.md)：了解最终删除、原件保留、拒绝与反馈恢复。
 - [人工入库审核服务](capability/application/ingestion-review.md)：了解最终决定、文件晋升、正式入库及反馈恢复。
 - [相似文件召回鲁棒性实验](capability/application/recall-robustness.md)：了解真实 PDF、摘要扰动、阈值与候选数量评估方法和适用边界。
@@ -70,10 +70,13 @@
 
 ## 数据契约
 
-- [公司部门与员工契约](architecture/data/employee.md)：了解顶级部门、钉钉用户唯一 ID、平台权限 JSON 映射与子平台管理员关联。
+- [公司部门与员工契约](architecture/data/employee.md)：了解全部一级部门、任职资料、平台权限 JSON 映射、管理员关联及新旧库边界。
+- [员工刷新与资料待同步契约](architecture/data/personnel-refresh.md)：姓名、部门和任职资料更新，SQLite 待同步标记及部分失败结果。
+- [用户授权变更契约](architecture/data/user-access.md)：增量文件等级、管理员关系和持久重试标记。
+- [正式文件等级变更契约](architecture/data/file-level-adjustment.md)：等级变更审计、发布状态和历史字段。
 - [文件通行证数组契约](architecture/data/passport.md)：了解多通行证、跨组推荐、完整删除校验及已有数据库升级。
 - [平台目录内存契约](architecture/data/platform-directory.md)：了解公开平台字段、不可变快照与过期标记。
-- [登录身份契约](architecture/data/authenticated-user.md)：了解 userid、部门、权限与 token 会话边界。
+- [登录身份契约](architecture/data/authenticated-user.md)：了解当前身份的最小字段、内部员工投影及三类文件授权边界。
 - [注册中心审核表契约](architecture/data/review.md)：了解完整入库暂存、轻量删除申请各自的字段、状态及资源关联约束。
 - [注册中心资源表契约](architecture/data/resource.md)：了解正式文件字段、入库备注、文件名、向量和通行证约束。
 
@@ -83,13 +86,9 @@
 
 - [API 参考](api/readme.md)：查看完整接口目录与接入流程。
 - [当前身份 API](api/auth.md)：使用中央用户 token 查询当前身份。
-
+- [人员管理 API](api/user.md)：查询员工和部门、手动刷新资料、增量维护文件权限及管理员关系。
 - [平台查看 API](api/platform.md)：查看包含注册中心自身的全部平台及存活状态、下次计划同步时间。
-
 - [正式文件目录 API](api/catalog.md)：获取所有正式文件的 ID、来源平台、入库文件名称、入库申请人、审核人、入库时间、摘要和最终通行证。
-
-- [正式与待审文件原件 API](api/resource.md)：通过正式资源 ID 或待审审核 ID 拉取原件，按文件后缀返回对应媒体类型。
-
+- [正式与待审文件原件 API](api/resource.md)：管理员原件与头像代理、用户文件等级下载、可信知识后端后台下载及各自认证方式。
 - [文件删除审核 API](api/deletion-review.md)：获取待删除申请、按审核员查询历史并确定是否删除。
-
 - [文件入库审核 API](api/ingestion-review.md)：获取待审申请与推荐通行证，确定同意或拒绝入库，并按审核员查询历史。

@@ -24,7 +24,7 @@
 
 知识后端在可信登录完成后，以自身平台凭据调用 `PUT /user/login-cache`，提交 userid 和本次签发的 access_token；中央保证同一用户只有一个当前 token，新登录使旧 token 立即失效。registry 客户端不再提供该写接口和用户 full-table 方法，应用启动不发布用户总表，也不建立开发模拟登录。
 
-本项目保留 `MiddlewareClient.update_user_info` 对接 `POST /user/update`，用于 registry 人员资料和权限维护。[权限管理](../application/user-access.md)发送当前完整permissions映射，省略username，并通过admins/add或remove同步指定平台管理员。[手动刷新](../application/personnel-refresh.md)在数据库提交后仅发送变化姓名，不发送 permissions、不调用全表或登录写入接口。平台管理员总表发布已迁至知识后端，registry 的 [PlatformAdminService](../application/authorization.md#管理员资料与同步) 只查询管理权和展示资料。
+本项目保留 `MiddlewareClient.update_user_info` 对接 `POST /user/update`，用于 registry 人员资料和权限维护。[权限管理](../application/user-access.md)发送当前完整permissions映射，省略 username 和 departments，并通过 admins/add 或 remove同步指定平台管理员。[手动刷新](../application/personnel-refresh.md)在数据库提交后发送本次全部目标及历史待同步员工的当前姓名和完整部门名称列表，不发送 permissions、不调用全表或登录写入接口。平台管理员总表发布已迁至知识后端，registry 的 [PlatformAdminService](../application/authorization.md#管理员资料与同步) 只查询管理权和展示资料。
 
 两后端必须使用同一权威人员与权限数据源，权限更新需要先持久化；中央用户全表的旧快照可能覆盖并发增量更新，进程内锁不能解决跨后端竞态。本轮未实现源版本条件发布或跨后端串行机制，真实切换仍需处理该边界，不能将本地 token 联调视作一致性已解决。
 
@@ -33,10 +33,10 @@
 ## 配置与装配
 
 - `AUTH_REQUEST_TIMEOUT_SECONDS`：中央用户查询的总超时，默认 5 秒。
-- 旧 `MIDDLEWARE_USER_SYNC_*`、开发登录、钉钉及头像配置均已清理，不再提供兼容别名。
+- 旧 `MIDDLEWARE_USER_SYNC_*`、开发登录、钉钉登录和本地头像存储配置不再读取。现有 `DINGTALK_*` 仅供手动通讯录刷新，`KNOWLEDGE_ACCUMULATION_*` 用于 HTTP 头像代理。
 - [平台会话配置](middleware-session.md)提供中间件地址和 registry 凭据；缺少有效平台会话时认证返回 503。
 
-`app/main.py` 装配中央认证、人员仓库及管理员服务，不加载旧的开发登录或钉钉凭据，也不创建本地用户会话缓存。实际 `.env` 已移除管理员全表同步开关，其他连接和业务配置保留。
+`app/main.py` 装配中央认证、人员仓库及管理员服务，不加载旧的开发登录或钉钉登录配置，也不创建本地用户会话缓存。实际部署应清理已移除的全表同步开关，并按当前配置模板核对连接及业务项。
 
 ---
 

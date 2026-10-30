@@ -17,6 +17,8 @@ from app.model.user_access import UserAccessPatch, UserAccessState, UserAccessEr
 
 _EMPLOYEE_SELECT = (
     'SELECT e.userid,e.name,e.avatar_url,e.department_id,e.platform_permissions,d.name AS department_name, '
+    "COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('id', dep.id, 'name', dep.name)) FROM departments dep "
+    'WHERE JSON_CONTAINS(COALESCE(e.department_ids,JSON_ARRAY(e.department_id)),CAST(dep.id AS JSON))),JSON_ARRAY()) AS departments, '
     # 同一条查询读取员工与管理员关联，避免文件权限等级被误用为管理身份。
     'COALESCE((SELECT JSON_ARRAYAGG(a.platform_code) FROM platform_admins AS a '
     'WHERE a.employee_userid=e.userid),JSON_ARRAY()) AS managed_platforms '
@@ -29,7 +31,14 @@ def _user(row: dict) -> AuthenticatedUser:
     return AuthenticatedUser(userid=row['userid'], name=row['name'],
         avatar_url=avatar_response_filename(row['avatar_url']), department_id=row['department_id'],
         department_name=row['department_name'], platform_permissions=json.loads(row['platform_permissions']),
-        managed_platforms=json.loads(row['managed_platforms']))
+        managed_platforms=json.loads(row['managed_platforms']),
+        departments=sorted(json.loads(row['departments']),key=lambda item:item['id']))
+
+
+def _refresh_target(row: dict) -> EmployeeRefreshTarget:
+    # JSON 解析和资料校验失败必须中止刷新，不能用空资料掩盖损坏或缺少迁移。
+    return EmployeeRefreshTarget.model_validate({**row, 'work_profile': json.loads(row['work_profile']),
+        'department_ids': json.loads(row['department_ids']) if row.get('department_ids') is not None else None})
 
 
 class MySQLEmployeeRepository:
@@ -85,25 +94,26 @@ class MySQLEmployeeRepository:
         return [DepartmentInfo.model_validate(row) for row in rows]
 
     async def list_employee_records(self) -> list[EmployeeInfo]:
-        """仅读取 employees 五个字段，部门与管理员信息由调用方另行关联。"""
+        """读取员工基础字段及全部部门ID，部门名称与管理员信息由调用方另行关联。"""
         await self._initialize()
         async with asyncio.timeout(self._settings.operation_timeout_seconds):
             async with self._pool.acquire() as connection, connection.cursor(aiomysql.DictCursor) as cursor:
-                await cursor.execute('SELECT userid,name,avatar_url,department_id,platform_permissions '
+                await cursor.execute('SELECT userid,name,avatar_url,department_id,department_ids,platform_permissions '
                                      'FROM employees ORDER BY userid')
                 rows = await cursor.fetchall()
         return [EmployeeInfo(userid=row['userid'], name=row['name'],
                              avatar_url=avatar_response_filename(row['avatar_url']),
                              department_id=row['department_id'],
+                             department_ids=json.loads(row['department_ids']) if row['department_ids'] is not None else [row['department_id']],
                              platform_permissions=json.loads(row['platform_permissions'])) for row in rows]
 
     async def list_refresh_targets(self) -> list[EmployeeRefreshTarget]:
-        """刷新只读取 userid、姓名和部门，不依赖头像或权限的解析。"""
+        """读取姓名、部门和任职资料快照，不依赖头像或权限的解析。"""
         await self._initialize()
         async with asyncio.timeout(self._settings.operation_timeout_seconds):
             async with self._pool.acquire() as connection, connection.cursor(aiomysql.DictCursor) as cursor:
-                await cursor.execute('SELECT userid,name,department_id FROM employees ORDER BY userid')
-                return [EmployeeRefreshTarget.model_validate(row) for row in await cursor.fetchall()]
+                await cursor.execute('SELECT userid,name,department_id,department_ids,work_profile FROM employees ORDER BY userid')
+                return [_refresh_target(row) for row in await cursor.fetchall()]
 
     async def refresh_profiles(self, changes: list[EmployeeRefreshChange], departments: list[DepartmentInfo]) -> None:
         """同一事务更新已有员工及部门名称；禁止插入员工、覆盖权限、头像或管理员关系。"""
@@ -113,8 +123,8 @@ class MySQLEmployeeRepository:
                 await connection.begin()
                 try:
                     async with connection.cursor(aiomysql.DictCursor) as cursor:
-                        await cursor.execute('SELECT userid,name,department_id FROM employees ORDER BY userid FOR UPDATE')
-                        current = {row['userid']: EmployeeRefreshTarget.model_validate(row) for row in await cursor.fetchall()}
+                        await cursor.execute('SELECT userid,name,department_id,department_ids,work_profile FROM employees ORDER BY userid FOR UPDATE')
+                        current = {row['userid']: _refresh_target(row) for row in await cursor.fetchall()}
                         # 外部资料读取期间员工若被编辑或删除，本次重试，避免覆盖更新后的资料。
                         if any(current.get(change.before.userid) != change.before for change in changes):
                             raise PersonnelRefreshError('员工资料在刷新期间发生变化，请重新刷新',
@@ -124,8 +134,10 @@ class MySQLEmployeeRepository:
                                                  'ON DUPLICATE KEY UPDATE name=VALUES(name)',
                                                  (department.id, department.name))
                         for change in sorted(changes, key=lambda item: item.before.userid):
-                            await cursor.execute('UPDATE employees SET name=%s,department_id=%s WHERE userid=%s',
-                                                 (change.name, change.department_id, change.before.userid))
+                            await cursor.execute('UPDATE employees SET name=%s,department_id=%s,work_profile=%s,department_ids=%s WHERE userid=%s',
+                                                 (change.name, change.department_id,
+                                                  change.work_profile.model_dump_json(),
+                                                  json.dumps(change.department_ids or [change.department_id]), change.before.userid))
                     await connection.commit()
                 except BaseException:
                     await asyncio.shield(connection.rollback())

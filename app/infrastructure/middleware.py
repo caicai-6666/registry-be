@@ -45,6 +45,20 @@ class MiddlewareLoginResponse(MiddlewareSessionResponse):
         return self
 
 
+class PlatformTokenStatus(BaseModel):
+    model_config = ConfigDict(frozen=True, extra='forbid')
+
+    valid: bool = Field(strict=True, description='目标平台令牌在本次只读查询时是否有效。')
+    code: str | None = Field(strict=True, pattern=r'^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$',
+        description='有效令牌对应的平台代号；无效令牌时必须为 null。')
+
+    @model_validator(mode='after')
+    def validate_identity(self):
+        if self.valid != (self.code is not None):
+            raise ValueError('平台令牌校验状态与平台身份不一致')
+        return self
+
+
 class IngestionResultPublished(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
     message_id: str = Field(min_length=1, max_length=128, strict=True)
@@ -88,6 +102,16 @@ class MiddlewareClient:
             headers={"Authorization": f"Bearer {token.get_secret_value()}"},
         )
         return self._validate_response(response, MiddlewareSessionResponse, platform_code)
+
+    async def resolve_platform(self, access_token: SecretStr, token: SecretStr) -> PlatformTokenStatus:
+        """用 registry 自身会话只读校验调用方平台令牌，不续期任一平台或用户会话。"""
+        response = await self._http.post('middleware-service/api/platform/token/verify',
+            headers={'Authorization': f'Bearer {token.get_secret_value()}'},
+            json={'access_token': access_token.get_secret_value()})
+        response.raise_for_status()
+        if response.status_code != 200:
+            raise ValueError('平台令牌校验必须返回 200')
+        return PlatformTokenStatus.model_validate(response.json())
 
     async def update_user_info(self, update: MiddlewareUserPatch, token: SecretStr) -> MiddlewareUserInfo:
         body = update.model_dump(exclude_unset=True)

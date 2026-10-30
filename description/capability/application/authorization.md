@@ -8,7 +8,7 @@
 
 `app/router/dependency.py` 提供普通登录入口 `require_user` 和管理入口 `require_platform_admin`（参数注入名 `PlatformAdminUserDependency`）。管理入口复用普通登录依赖，先解析用户 Bearer，通过 `AuthService.resolve_user` 向中间件确认真实已注册的中央用户和有效登录，再使用 registry 平台会话调用 `GET /middleware-service/api/platform/admins/list`，按可信 userid 验证管理权。第一步未通过，不取得管理员服务或查询名单。
 
-`app/main.py` 创建带 `Depends(require_platform_admin)` 的业务路由组，auth、user、platform、catalog、resource、ingestion-review、deletion-review 均加入此组；user 已提供用户/部门列表与手动刷新。新管理路由也必须加入该组；仅正式文件的 `/resource/authorized-file/{resource_id}` 在组外单独挂载，并显式注入登录与文件授权依赖。OpenAPI、Swagger 和 ReDoc 是框架文档入口，不承担业务操作，继续公开用于文档和容器 HTTP 探针。
+`app/main.py` 创建带 `Depends(require_platform_admin)` 的业务路由组，auth、user、platform、catalog、resource、ingestion-review、deletion-review 均加入此组；user 已提供用户/部门列表与手动刷新。新管理路由也必须加入该组；正式文件的 `/resource/authorized-file/{resource_id}` 在组外单独挂载，显式注入登录与文件授权依赖；服务间 `/resource/service-authorized-file/{resource_id}` 同样独立挂载，显式验证知识后端平台令牌及员工文件权限。OpenAPI、Swagger 和 ReDoc 是框架文档入口，不承担业务操作，继续公开用于文档和容器 HTTP 探针。
 
 | 依赖 | 用途 |
 | --- | --- |
@@ -33,6 +33,18 @@ async def management(user: PlatformAdminUserDependency):
 [普通用户原件接口](../../api/resource.md#按用户权限获取正式文件原件)复用 `require_user`，随后由 `require_file_access` 比较本地权威员工权限和正式资源当前等级。只查询员工权限 JSON，不 JOIN 部门或管理员关系；中央身份提供 userid，本地数据库提供当前权限。员工不存在、缺少来源平台键、文件等级未知或用户等级不足时返回403。显式0与缺键不同；管理员身份不能绕过本入口的文件等级。
 
 授权成功后复用既有正式文件安全读取及媒体响应，不读取审核暂存或删除保留目录。失败保留401/403/404/503语义，不从 token 内客户端声明或旧登录权限恢复授权。此入口单独挂载，不改变任何现有管理路由。
+
+---
+
+## 服务间正式文件授权
+
+[可信后台原件接口](../../api/resource.md#可信后台代用户获取正式文件原件)供知识后端的助理机器人和定时任务使用。`ServiceFileAuth` 复用registry现有平台会话和 `MiddlewareClient`，调用中间件 `POST /platform/token/verify`：Authorization携带registry自身令牌，JSON仅携带待验证的调用方access_token。严格验收valid/code及二者一致性，有效身份必须为固定平台 `knowledge-accumulation`；其他有效平台（含registry）返回403。无效调用方令牌返回401；依赖故障、registry自身令牌失效、接口尚未部署时返回503，禁止降级为裸userid、heartbeat或用户身份猜测。
+
+调用平台通过认证后，body中的userid才作为可信后台绑定的任务所属员工；模型不能选择该字段。`require_service_file_access` 与用户登录入口共用 `check_employee_file_access`，实时读取SQL权限并按正式资源来源平台与当前file_level比较。既不需要用户token，也不创建/续期用户登录、提升文件权限或绕过文件等级。平台认证和文件权限均不缓存；授权后复用原件安全读取。请求失败不回显令牌、路径或上游正文。
+
+组合根在既有HTTP客户端生命周期中装配认证器，无新增客户端或共享密钥；超时复用 `AUTH_REQUEST_TIMEOUT_SECONDS`。中间件上游401仅失效本次registry平台token，由现有平台会话任务重登，不触碰调用平台会话。需先部署中间件只读校验能力；接口契约以[文件API](../../api/resource.md#可信后台代用户获取正式文件原件)为准。
+
+本地 `tests/test_service_authorized_file.py` 使用内存HTTP/SQL/原件替身，覆盖令牌隔离、只读验证精确载荷、无效/其他平台、失败关闭、SQL实时撤权、来源平台隔离、显式0、未知文件等级、缺失原件、严格body、旧用户入口兼容及脱敏错误。不启动应用生命周期，不读写 `data/`；测试按项目规则本地保留。
 
 ---
 
@@ -62,9 +74,9 @@ async def management(user: PlatformAdminUserDependency):
 
 | 配置 | 默认 | 含义 |
 | --- | --- | --- |
-| `AUTH_REQUEST_TIMEOUT_SECONDS` | `5` | 用户验证总超时，以及单轮管理员查询超时。 |
+| `AUTH_REQUEST_TIMEOUT_SECONDS` | `5` | 用户验证总超时、单轮管理员查询及服务间平台校验超时。 |
 
-旧开发登录、钉钉、头像和用户同步配置及其别名均已移除。进程环境优先于 `.env`，不执行插值，变更后需重启或重建服务。
+旧开发登录、钉钉登录、本地头像存储和全表同步配置已移除；现有通讯录刷新与 HTTP 头像代理配置分别由对应能力维护。进程环境优先于 `.env`，不执行插值，变更后需重启或重建服务。
 
 | 状态码 | 含义 |
 | --- | --- |
@@ -78,6 +90,6 @@ async def management(user: PlatformAdminUserDependency):
 
 ## 验证
 
-`tests/test_management_dependencies.py` 覆盖全部17个业务接口的401/403/503与OpenAPI403声明；`tests/test_resource_api.py` 验证文件等级足够仍不能绕过管理员；`tests/test_platform_api.py` 验证普通用户不能查看平台。中间件精确查询契约、实时管理员名单和无总表写入由 `tests/test_platform_admin.py` 验证。测试使用隔离身份、HTTP替身和 tests/tmp，不改共享数据。
+`tests/test_management_dependencies.py` 覆盖管理路由的 401/403/503 与 OpenAPI 403 声明；`tests/test_resource_api.py` 验证文件等级足够仍不能绕过管理员；`tests/test_platform_api.py` 验证普通用户不能查看平台。中间件精确查询契约、实时管理员名单和无总表写入由 `tests/test_platform_admin.py` 验证。测试使用隔离身份、HTTP替身和 tests/tmp，不改共享数据。
 
 `tests/test_authorized_resource.py` 覆盖普通用户精确/更高等级、显式0与缺键、来源平台隔离、未知等级、管理员不能旁路、权限撤销/文件等级变更即时生效、中央/数据库故障、原件读取及单表权限严格校验。测试不连接共享服务，文件与数据库使用 tests/tmp。

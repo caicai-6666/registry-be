@@ -60,4 +60,4 @@ python scripts/recall_robustness.py \
 
 产物包括 `inventory.json`、`manifest.json`、`raw-chat/`、`summaries/`、`queries.json`、`embedding-cache/`、`vectors.npz`、`exact-results.json`、`metrics.json`、`cross-document-pairs.json`、HNSW 结果和清理记录。人工分析在该次运行的 `analysis.md` 追加，不能把结论写回原始响应。
 
-实验提示词见[提示词说明](../../../experiment/recall-robustness/prompts.md)，目录边界见[测试与实验规范](../../standard/experiment.md)。实际运行结果通过[实验导航](../../../experiment/readme.md)进入。
+实验提示词及历史导航仅在另备本地产物的环境可用，分别为 `experiment/recall-robustness/prompts.md`、`experiment/readme.md`；脚本、样本和原始响应不随 Git 交付。目录边界见[测试与实验规范](../../standard/experiment.md)。

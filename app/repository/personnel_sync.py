@@ -1,4 +1,4 @@
-"""SQLite 仅保存待同步姓名的 userid，不复制员工资料或权限。"""
+"""SQLite 仅保存待同步姓名和部门的 userid，不复制员工资料或权限。"""
 import asyncio
 from uuid import uuid4
 
@@ -6,6 +6,7 @@ from app.infrastructure.sqlite import SQLiteDatabase
 
 
 class SQLitePersonnelSyncRepository:
+    # 复用原表名和revision，兼容已有未完成项，无需迁移或清空队列。
     def __init__(self,database: SQLiteDatabase):
         self.database=database
         self._ready=False
