@@ -1,5 +1,11 @@
 """知识沉淀注册中心后端的 ASGI 应用入口与服务生命周期。"""
 
+import os
+
+# 路由与头像代理在导入时读取前缀，必须先设置，不能依赖热重载子进程重新导入。
+if __name__ == "__main__":
+    os.environ["APP_PATH_PREFIX"] = "/dev"
+
 # 直接运行文件时将项目根目录加入导入路径，支持 IDE 和不同工作目录。
 if __name__ == "__main__" and not __package__:
     import sys
@@ -8,7 +14,6 @@ if __name__ == "__main__" and not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from contextlib import AsyncExitStack, asynccontextmanager
-import os
 
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -252,8 +257,6 @@ if __name__ == "__main__":
 
     import uvicorn
 
-    # 重载子进程继承开发前缀，路由与知识后端头像代理保持一致。
-    os.environ["APP_PATH_PREFIX"] = "/dev"
-    # 热重载必须使用模块导入字符串；显式监控 app，兼容 IDE 的不同工作目录。
-    uvicorn.run("app.main:app", host="127.0.0.1", port=16000, reload=True,
+    # 默认关闭热重载；如需开启，模块导入字符串与显式监控目录同样支持开发前缀。
+    uvicorn.run("app.main:app", host="127.0.0.1", port=16000, reload=False,
                 reload_dirs=[str(Path(__file__).resolve().parent)])

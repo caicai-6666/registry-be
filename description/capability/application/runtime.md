@@ -57,7 +57,7 @@ Dockerfile 只复制依赖文件与 `app/`，运行数据仍通过挂载持久�
 
 MySQL 连接参数用于正式资源查询、入库与删除接收中的资源核对，以及人工批准后的正式写入。[正式文件目录 API](../../api/catalog.md)可在关闭后台消费时独立使用，首次请求时建立连接。[SQLite 基础设施](../infrastructure/sqlite.md)在应用启动时初始化两张审核表，入库接收与工作流会在 ACK 前保存审核记录；[人工入库审核服务](ingestion-review.md)与[人工删除审核服务](deletion-review.md)保存决定并恢复未完成处理，关闭消息消费也可审核已有申请。OpenAI 配置预留给后续功能。MySQL 超时配置以[数据库连接说明](../infrastructure/mysql.md#后端连接配置)为准。
 
-配置模块通常按“进程环境优先于项目根目录 `.env`”加载，且关闭值插值。`APP_PATH_PREFIX` 是路由导入时读取的进程环境变量：直接执行入口设置 `/dev`，统一 Compose 固定为空，不依赖在 `.env` 中声明该变量。修改任一配置后重启服务。
+配置模块通常按“进程环境优先于项目根目录 `.env`”加载，且关闭值插值。`APP_PATH_PREFIX` 是路由导入时读取的进程环境变量：直接执行入口在导入路由和头像代理配置之前设置 `/dev`，统一 Compose 固定为空，不依赖在 `.env` 中声明该变量。修改任一配置后重启服务。
 
 用户在知识后端完成登录，registry 通过[中央用户认证](../infrastructure/middleware-user.md)直接查询用户 token。用户及管理员总表均由知识后端发布，registry 无总表同步开关；缺少平台会话或查询故障返回 503，不使用本地开发凭据放行。
 
@@ -102,11 +102,13 @@ conda activate registry-be
 python app/main.py
 ```
 
-也可以在 IDE 中直接运行 `app/main.py`，或执行 `python -m app.main`。文件内启动设置 `APP_PATH_PREFIX=/dev`，业务接口为 `/dev/knowledge-accumulation/registry/api`；头像代理沿用相同开发前缀。Docker/ASGI 默认仍使用生产路径。文件内启动使用单个 worker，监听 `127.0.0.1:16000`，默认开启代码热重载；通过 `app.main:app` 导入字符串加载应用，显式监控 `app/`，不依赖 IDE 的工作目录。应用装配当前认证模块、中间件注册、心跳、平台目录刷新、入库与删除接收、人工入库与删除审核恢复及停机清理生命周期；直接运行文件时按文件位置确定项目导入路径。
+也可以在 IDE 中直接运行 `app/main.py`，或执行 `python -m app.main`。文件内启动在导入 `app.config.api` 及业务路由之前设置 `APP_PATH_PREFIX=/dev`，业务接口为 `/dev/knowledge-accumulation/registry/api`；头像代理沿用相同开发前缀。Docker/ASGI 默认仍使用生产路径。文件内启动使用单个 worker，监听 `127.0.0.1:16000`，默认关闭代码热重载，修改代码或 `.env` 后需手动重启；通过 `app.main:app` 导入字符串加载应用，显式监控 `app/`，不依赖 IDE 的工作目录。应用装配当前认证模块、中间件注册、心跳、平台目录刷新、入库与删除接收、人工入库与删除审核恢复及停机清理生命周期；直接运行文件时按文件位置确定项目导入路径。
 
 应用自行读取 `.env` 配置，入口为 `app/main.py` 中的 `app` 对象。直接启动时浏览器访问 `http://127.0.0.1:16000/docs` 查看接口文档，`http://127.0.0.1:16000/openapi.json` 返回当前应用 Schema。
 
-也可以通过命令行开启自动重载：
+前缀在导入时确定，不能在创建应用后才设置，否则同一进程会继续使用已缓存的旧路由与头像代理前缀。直接运行文件或模块均不依赖 reload；ASGI 导入仍由进程环境决定生产或开发路径。
+
+如需自动重载，也可以通过命令行显式开启：
 
 ```bash
 APP_PATH_PREFIX=/dev python -m uvicorn app.main:app --host 127.0.0.1 --port 16000 --reload
@@ -171,3 +173,15 @@ Compose 同时提供 `registry-frontend` 服务（默认宿主机端口 `23080`�
 容器内的 `127.0.0.1` 指向后端容器自身，不能直接使用本机开发的 MySQL 地址连接其他容器。宿主机知识后端必须监听容器可达的接口；仅监听 `127.0.0.1` 在部分部署环境中不可达。
 
 镜像基础参考 [Python 官方镜像说明](https://hub.docker.com/_/python)。
+
+---
+
+## 开发前缀回归验证
+
+本地 `tests/test_development_entry_prefix.py` 使用独立子进程验证直接运行文件、`python -m app.main`、默认 ASGI 导入和显式开发前缀。前两种方式在关闭 reload 时仍应注册完整 `/dev/knowledge-accumulation/registry/api` 路径，头像代理前缀与路由一致；默认 ASGI 导入继续注册生产路径。测试通过替换 Uvicorn 启动函数检查真实应用装配，不启动端口或应用生命周期，并显式将数据目录隔离到 `tests/tmp/`。
+
+```bash
+python -B -m unittest discover -s tests -p 'test_development_entry_prefix.py' -v
+```
+
+测试文件按项目规则仅本地保留，新克隆需另备。生产部署的端口、前缀覆盖与数据卷仍以统一部署配置为准。
