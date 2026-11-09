@@ -1,6 +1,7 @@
 """人工入库审核、跨库文件晋升与持久化决定恢复。"""
 
 import asyncio
+import json
 import logging
 from uuid import uuid4
 from weakref import WeakValueDictionary
@@ -10,7 +11,9 @@ from app.model.review import ReviewNotFound, ReviewConflict, ReviewUnavailable
 
 from app.repository.resource import MySQLResourceRepository, ResourceApprovalConflict
 from app.repository.review import SQLiteReviewRepository
-from app.schema.ingestion_review import IngestionReviewDecision, IngestionReviewResultResponse
+from app.schema.ingestion_review import IngestionReviewDecision, IngestionReviewResultResponse, IngestionRecommendationResponse
+from app.agent.passport_recommendation import PassportRecommendationInput
+from app.service.passport_recommendation import PassportRecommendationService
 from app.service.middleware_session import MiddlewareSessionService
 from app.service.review_files import ReviewFileService
 from app.infrastructure.middleware import MiddlewareClient
@@ -21,12 +24,15 @@ logger = logging.getLogger(__name__)
 class IngestionReviewService:
     def __init__(self, reviews: SQLiteReviewRepository, resources: MySQLResourceRepository,
                  files: ReviewFileService, sessions: MiddlewareSessionService, middleware: MiddlewareClient | None,
-                 *, timeout_seconds: float = 40, retry_interval_seconds: float = 30):
+                 *, timeout_seconds: float = 40, retry_interval_seconds: float = 30,
+                 recommendations: PassportRecommendationService | None = None):
         self.reviews, self.resources, self.files = reviews, resources, files
         self.sessions, self.middleware = sessions, middleware
         self.timeout_seconds, self.retry_interval_seconds = timeout_seconds, retry_interval_seconds
         self._locks: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
         self._task: asyncio.Task | None = None
+        self.recommendations = recommendations
+        self._recommending: set[int] = set()
 
     def _lock(self, review_id: int) -> asyncio.Lock:
         # 同一申请的 HTTP、附件读取与后台恢复串行执行；锁无引用后释放，不积累历史 ID。
@@ -56,6 +62,36 @@ class IngestionReviewService:
             if row["file_url"] is None:
                 raise ReviewNotFound("待审文件原件不存在")
             return row["file_url"], await self.files.read_ingestion(row["source_platform"], row["file_url"])
+
+    async def recommend(self, review_id: int) -> IngestionRecommendationResponse:
+        if review_id in self._recommending:
+            raise ReviewConflict("该申请正在推荐中，请勿重复发起")
+        # 检查与登记之间不 await，单进程内重复点击立即返回冲突；取消也必须清除占用。
+        self._recommending.add(review_id)
+        try:
+            async with self._lock(review_id):
+                row = await self._review(review_id)
+                if row["status"] != "pending" or row["decision"] is not None:
+                    raise ReviewConflict("该申请已确定审核决定，不能重新推荐")
+                if any(row[key] is None for key in ("name", "abstract", "embedding", "file_url")):
+                    raise ReviewConflict("申请缺少名称、摘要、向量或原件信息，不能重新推荐")
+                if self.recommendations is None:
+                    raise ReviewUnavailable("通行证推荐服务未配置，请检查模型与搜索配置")
+                file = PassportRecommendationInput(
+                    name=row["name"], abstract=row["abstract"], abstract_embedding=json.loads(row["embedding"]),
+                )
+                content = await self.files.read_ingestion(row["source_platform"], row["file_url"])
+            # 耗时推理不持有审核锁；输入为已读取的快照，允许审核正常提交和迁移原件。
+            result, _ = await self.recommendations.recommend(
+                file, content, platform_code=row["source_platform"], file_name=row["file_url"],
+            )
+            async with self._lock(review_id):
+                await self.reviews.replace_recommendations(
+                    review_id, result.recommendations, expected_updated_at=row["updated_at"],
+                )
+            return IngestionRecommendationResponse(id=review_id, passport_recommendations=result.recommendations)
+        finally:
+            self._recommending.discard(review_id)
 
     async def decide(self, review_id: int, body: IngestionReviewDecision, reviewer: str) -> IngestionReviewResultResponse:
         async with self._lock(review_id):

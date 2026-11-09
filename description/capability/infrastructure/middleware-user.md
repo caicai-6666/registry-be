@@ -12,7 +12,7 @@
 {"access_token":"replace-with-user-access-token"}
 ```
 
-有效返回 `{"userid":"user-001","username":"审核员甲","is_logged_in":true,"ttl":90}`；未知、过期或被新登录替换时返回 `{"userid":null,"username":null,"is_logged_in":false,"ttl":0}`。有效期以中央实际返回为准，不在 registry 写死 90 秒。DTO 严格验证布尔、整数、非空 userid、username 和状态一致性，拒绝旧的离线 userid 响应。
+有效返回 `{"userid":"user-001","username":"审核员甲","departments":[],"employment_status":"employed","is_logged_in":true,"ttl":90}`；未知、过期或被新登录替换时返回 `{"userid":null,"username":null,"departments":null,"employment_status":null,"is_logged_in":false,"ttl":0}`。有效期以中央实际返回为准，不在 registry 写死 90 秒。DTO 严格验证布尔、整数、非空 userid、username 和状态一致性，拒绝旧的离线 userid 响应。新增 employment_status 为 employed/resigned，有效登录不能显式为 null，离线必须为 null；兼容旧版本省略。离职仍可有有效中央登录，此字段不自行变更认证与授权。
 
 `app/service/auth.py` 的 `AuthService.resolve_user` 每次查询中央，直接使用可信 userid 和 username 构造最小身份，不查询员工表。不保留用户 token 到 userid 的进程映射、不使用本地固定 TTL、不缓存认证成功。中央确认离线返回 HTTP 401；依赖故障返回 503。中间件的 HTTP 401 表示平台凭据失效，只失效本次使用的平台 token，不能误判为用户退出。日志仅记录异常类型及状态码，不输出用户 token、平台 token 或上游正文。
 
@@ -24,7 +24,7 @@
 
 知识后端在可信登录完成后，以自身平台凭据调用 `PUT /user/login-cache`，提交 userid 和本次签发的 access_token；中央保证同一用户只有一个当前 token，新登录使旧 token 立即失效。registry 客户端不再提供该写接口和用户 full-table 方法，应用启动不发布用户总表，也不建立开发模拟登录。
 
-本项目保留 `MiddlewareClient.update_user_info` 对接 `POST /user/update`，用于 registry 人员资料和权限维护。[权限管理](../application/user-access.md)发送当前完整permissions映射，省略 username 和 departments，并通过 admins/add 或 remove同步指定平台管理员。[手动刷新](../application/personnel-refresh.md)在数据库提交后发送本次全部目标及历史待同步员工的当前姓名和完整部门名称列表，不发送 permissions、不调用全表或登录写入接口。平台管理员总表发布已迁至知识后端，registry 的 [PlatformAdminService](../application/authorization.md#管理员资料与同步) 只查询管理权和展示资料。
+本项目保留 `MiddlewareClient.update_user_info` 对接 `POST /user/update`，用于 registry 人员资料和权限维护。[权限管理](../application/user-access.md)发送当前完整permissions映射，省略 username、departments 和 employment_status，并通过 admins/add 或 remove同步指定平台管理员。[手动刷新](../application/personnel-refresh.md)在数据库提交后回读本次全部目标与历史待同步员工的当前状态；在职发送姓名、完整部门名称列表及 employment_status=employed，离职只发送 employment_status=resigned，不发送 permissions、不调用全表或登录写入接口。资料响应接收 employment_status，显式 null 或未知值拒绝；旧响应缺字段仅兼容不写状态的请求。同步状态时必须校验明确返回且与请求一致，缺失或不一致均保留待同步项。平台管理员总表发布已迁至知识后端，registry 的 [PlatformAdminService](../application/authorization.md#管理员资料与同步) 只查询管理权和展示资料。
 
 两后端必须使用同一权威人员与权限数据源，权限更新需要先持久化；中央用户全表的旧快照可能覆盖并发增量更新，进程内锁不能解决跨后端竞态。本轮未实现源版本条件发布或跨后端串行机制，真实切换仍需处理该边界，不能将本地 token 联调视作一致性已解决。
 

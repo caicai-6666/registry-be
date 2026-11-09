@@ -8,6 +8,7 @@ from app.infrastructure.sqlite import SQLiteDatabase
 from app.model.file_level import FILE_LEVEL
 from app.model.passport import encode_passports, decode_passports, passport_record
 from app.model.resource import ActiveSourceConflict, IngestionDelivery, StoredFile, StoredResource
+from app.model.review import ReviewConflict, ReviewNotFound
 
 AUTO_REVIEWER = "注册中心自动审核员"
 
@@ -153,6 +154,23 @@ class SQLiteReviewRepository:
             async with connection.execute("SELECT * FROM ingestion_reviews WHERE id=?", (review_id,)) as cursor:
                 row = await cursor.fetchone()
         return passport_record(row) if row is not None else None
+
+    async def replace_recommendations(self, review_id: int, recommendations: list, *, expected_updated_at: str) -> None:
+        """只替换仍处于同一待审快照的推荐，不触碰人工决定、通行证或反馈凭据。"""
+        result = PassportRecommendationResult(recommendations=recommendations)
+        encoded = json.dumps([item.model_dump() for item in result.recommendations], ensure_ascii=False)
+        async with self.database.transaction() as connection:
+            async with connection.execute("SELECT status,decision,updated_at FROM ingestion_reviews WHERE id=?", (review_id,)) as cursor:
+                row = await cursor.fetchone()
+            if row is None:
+                raise ReviewNotFound("入库审核申请不存在")
+            # 推理期间允许审核；写事务重新核对版本，防止覆盖已经审核或更新过的记录。
+            if row["status"] != "pending" or row["decision"] is not None or row["updated_at"] != expected_updated_at:
+                raise ReviewConflict("申请已审核或发生变更，请刷新后重试")
+            await connection.execute(
+                "UPDATE ingestion_reviews SET passport_recommendations=?,updated_at=? WHERE id=?",
+                (encoded, utc_text(datetime.now(timezone.utc)), review_id),
+            )
 
     async def list_pending(self) -> list[dict]:
         # 已确定决定但尚在处理的申请不再交给另一个审核人；不加载向量或磁盘路径。

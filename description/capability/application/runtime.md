@@ -63,7 +63,7 @@ MySQL 连接参数用于正式资源查询、入库与删除接收中的资源�
 
 中间件注册与心跳已接入应用启动流程，其配置由[中间件注册与心跳](../infrastructure/middleware-session.md)统一维护，并在启动时从进程环境或项目根目录 `.env` 读取。
 
-[多模态模型基础设施](../infrastructure/mllm.md)使用独立的 `VLLM_MLLM_` 配置；模型名与地址已经配置，已接入入库工作流的文件判重与通行证推荐节点；在后台入库接收启用时由应用创建、共享和关闭模型客户端，支持异步调用与 PDF 页面引用。
+[多模态模型基础设施](../infrastructure/mllm.md)使用独立的 `VLLM_MLLM_` 配置，已接入文件判重与通行证推荐。模型、embedding、推荐和 PDF 配置合法时，应用创建、共享和关闭相关客户端，支持异步调用与 PDF 页面引用；关闭后台入库消费也可[手动重新推荐](../../api/ingestion-review.md#重新推荐并保存通行证)。自动消费启用而智能配置无效时启动失败；未启用自动消费时保留审核能力，手动推荐返回 `503`。手动接口为同步 HTTP，客户端及反向代理需为模型计算预留足够超时。
 
 [入库申请接收服务](ingestion-consumer.md)默认在中间件配置完整时启用，待审核文件保存到 `REVIEW_LOG_ROOT/tmp-file/ingestion`，正式资源才使用 `RESOURCE_ROOT`。[删除申请接收服务](deletion-consumer.md)通过 `DELETION_ENABLED` 独立启用，待审引用 resource 中的原文件，收到申请时不移动文件。删除保留目录暂不自动清理，完整规则见[审核文件存储](../infrastructure/review-file-storage.md)。
 
@@ -157,6 +157,34 @@ docker logs -f registry-be-dev
 ```
 
 镜像健康检查读取 `/openapi.json`，只检查 Web 入口是否可响应。
+
+---
+
+## 员工状态与手动推荐上线检查
+
+本次员工状态和推荐改动不增加 Python 依赖，不要求修改本项目 `Dockerfile`，也不新增 SQLite 表或迁移。`Dockerfile` 已复制整个 `app/`，包含共用推荐服务；实际 `.env` 和运行数据仍不进入镜像。保持单实例、单 worker，按以下顺序确认外部兼容后再更新后端。
+
+| 检查项 | 发布要求 |
+| --- | --- |
+| 共享人员库 | `employees.employment_status` 为非空 `VARCHAR(16)`，默认 `employed`，约束只允许 `employed`／`resigned`。字段缺失会使人员列表和刷新失败。 |
+| 新空卷初始化 | 2026-11-09 核对时，统一部署 `mysql/init/003-personnel.sql` 尚未包含该列；部署项目需同步定义，或在初始化后、启动业务前完成同一迁移。 |
+| 已有数据卷 | 核对实际表定义；缺列时由数据库维护者执行知识后端 [022 迁移](../../../../knowledge-accumulation-be/schema/022-employee-employment-status.sql)。已迁移不重复执行，不清空卷；重建镜像不会升级旧表。 |
+| 中间件 | 用户资料更新接受并返回 `employment_status`。registry 写入状态时要求回执一致；不支持会保留待同步项并报错。 |
+| 前端 | 用户列表按 `employment_status` 区分在职／离职；手动推荐调用 `POST /ingestion-review/{review_id}/recommendations`，成功后替换建议列表。 |
+| 请求等待 | 当前推荐为同步 HTTP；核对浏览器、前端 Nginx 和外层网关的超时。现有 registry-fe 模板为 `proxy_read_timeout 660s`，宿主机配置需独立同步，重建后端镜像不会更新网关。660 秒也不保证覆盖所有候选批次的最坏耗时。 |
+| 运行配置 | 模型、embedding、推荐和 PDF 配置有效时装配手动推荐，关闭自动消费也可调用；头像缓存继续读取 `KNOWLEDGE_ACCUMULATION_AVATAR_CACHE_SECONDS`，默认 86400 秒，无需在部署 `.env` 重复配置。 |
+
+在目标数据库执行只读结构检查：
+
+```sql
+SHOW CREATE TABLE employees;
+```
+
+完整员工字段与权限要求见[员工数据契约](../../architecture/data/employee.md#在职状态)。本项目不自动执行 MySQL DDL；上述核对不代表目标生产数据库已迁移。新列迁移将历史员工默认设为在职，实际离职状态仍需通过权威信息或后续手动刷新确认。
+
+手动推荐的组级失败会保存其余有效结果，全部组失败会保存空数组；检索或公共准备失败保留旧推荐。接口没有后台任务 ID、持久任务队列或重启恢复，网关超时不代表后端未保存，应先刷新列表再判断。接入和错误处理以[重新推荐接口](../../api/ingestion-review.md#重新推荐并保存通行证)为准。
+
+完成数据库和中间件准备后，先发布 registry 后端，再发布依赖新字段的前端。上线验证应至少包括管理员人员列表、离职标识展示、待审列表、手动推荐写回和头像缓存响应头；`/openapi.json` 健康检查只证明 Web 入口可用。
 
 ---
 

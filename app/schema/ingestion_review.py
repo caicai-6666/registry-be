@@ -49,6 +49,14 @@ class PendingIngestionReviewResponse(BaseModel):
         description="通行证及推荐理由；null 表示历史记录未推荐，空数组表示无推荐。")
 
 
+class IngestionRecommendationResponse(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: int = Field(gt=0, description="重新推荐的 SQLite 入库审核记录 ID。")
+    passport_recommendations: list[PassportRecommendation] = Field(
+        description="本次重新计算并保存的通行证推荐；空数组表示无有效推荐，包括全部组判断失败。")
+
+
 class IngestionReviewResultResponse(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

@@ -10,6 +10,7 @@ from app.router.dependency import (
 )
 from app.schema.ingestion_review import (
     IngestionReviewDecision, IngestionReviewResultResponse, PendingIngestionReviewResponse, IngestionReviewHistoryResponse,
+    IngestionRecommendationResponse,
 )
 
 router = APIRouter(prefix="/ingestion-review", tags=["ingestion-review"],
@@ -35,6 +36,18 @@ async def list_ingestion_history(response: Response, service: IngestionReviewSer
     try:
         rows = await service.reviews.list_history(reviewer if reviewer is not None else current_reviewer.userid)
         result = [IngestionReviewHistoryResponse.model_validate(row) for row in rows]
+    except Exception as error:
+        raise ingestion_review_error(error) from None
+    response.headers["Cache-Control"] = "no-store"
+    return result
+
+
+@router.post("/{review_id}/recommendations", response_model=IngestionRecommendationResponse, summary="重新推荐并保存通行证",
+    responses={404: {"description": "审核申请或待审原件不存在"}, 409: {"description": "已审核、正在推荐、输入缺失或申请发生变更"}})
+async def recommend_ingestion(review_id: ReviewID, response: Response,
+                              service: IngestionReviewServiceDependency, reviewer: PlatformAdminUserDependency):
+    try:
+        result = await service.recommend(review_id)
     except Exception as error:
         raise ingestion_review_error(error) from None
     response.headers["Cache-Control"] = "no-store"

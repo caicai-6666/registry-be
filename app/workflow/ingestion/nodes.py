@@ -1,12 +1,11 @@
 """入库前置处理、并行判重子图调用、推荐适配与拒绝反馈。"""
 
 import asyncio
-from dataclasses import replace
 
 from langgraph.runtime import Runtime
 from langgraph.types import Overwrite
 from app.agent.file_deduplication import ComparisonFile, FileDeduplicationInput, FileDeduplicationResult
-from app.agent.passport_recommendation import PassportRecommendationInput, PassportRecommendationResult
+from app.agent.passport_recommendation import PassportRecommendationInput
 from app.service.ingestion_rejection import build_duplicate_rejection_note
 from app.service.source_identity import active_source_reason
 from app.model.resource import ActiveSourceConflict, StoredFile
@@ -228,20 +227,10 @@ async def recommend_passports(state: IngestionWorkflowState, runtime: Runtime[In
     file = PassportRecommendationInput(
         name=message.name, abstract=message.abstract, abstract_embedding=state["abstract_embedding"],
     )
-    current_pdf = state.get("current_pdf")
-
-    async def prepare_current_pdf():
-        nonlocal current_pdf
-        # 推荐组为空时不渲染；没有判重候选时，节点 2 在并发前仅调用一次。
-        if current_pdf is None:
-            current_pdf = await ctx.pdf_service.prepare(
-                state["file_content"], platform_code=message.platform_code, file_name=message.file.filename,
-            )
-        return current_pdf
-
-    passport_context = replace(ctx.passport_context, prepare_pdf=prepare_current_pdf)
-    output = await ctx.passport_workflow.ainvoke({"file": file, "current_pdf": current_pdf}, context=passport_context)
-    result = PassportRecommendationResult.model_validate(output)
+    result, current_pdf = await ctx.passport_service.recommend(
+        file, state["file_content"], platform_code=message.platform_code,
+        file_name=message.file.filename, current_pdf=state.get("current_pdf"),
+    )
     return {"passport_recommendations": result.recommendations, "current_pdf": current_pdf}
 
 

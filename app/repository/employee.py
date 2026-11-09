@@ -98,10 +98,11 @@ class MySQLEmployeeRepository:
         await self._initialize()
         async with asyncio.timeout(self._settings.operation_timeout_seconds):
             async with self._pool.acquire() as connection, connection.cursor(aiomysql.DictCursor) as cursor:
-                await cursor.execute('SELECT userid,name,avatar_url,department_id,department_ids,platform_permissions '
+                await cursor.execute('SELECT userid,name,employment_status,avatar_url,department_id,department_ids,platform_permissions '
                                      'FROM employees ORDER BY userid')
                 rows = await cursor.fetchall()
         return [EmployeeInfo(userid=row['userid'], name=row['name'],
+                             employment_status=row['employment_status'],
                              avatar_url=avatar_response_filename(row['avatar_url']),
                              department_id=row['department_id'],
                              department_ids=json.loads(row['department_ids']) if row['department_ids'] is not None else [row['department_id']],
@@ -112,10 +113,11 @@ class MySQLEmployeeRepository:
         await self._initialize()
         async with asyncio.timeout(self._settings.operation_timeout_seconds):
             async with self._pool.acquire() as connection, connection.cursor(aiomysql.DictCursor) as cursor:
-                await cursor.execute('SELECT userid,name,department_id,department_ids,work_profile FROM employees ORDER BY userid')
+                await cursor.execute('SELECT userid,name,employment_status,department_id,department_ids,work_profile FROM employees ORDER BY userid')
                 return [_refresh_target(row) for row in await cursor.fetchall()]
 
-    async def refresh_profiles(self, changes: list[EmployeeRefreshChange], departments: list[DepartmentInfo]) -> None:
+    async def refresh_profiles(self, changes: list[EmployeeRefreshChange], departments: list[DepartmentInfo],
+                               resigned: list[EmployeeRefreshTarget]) -> None:
         """同一事务更新已有员工及部门名称；禁止插入员工、覆盖权限、头像或管理员关系。"""
         await self._initialize()
         async with asyncio.timeout(self._settings.operation_timeout_seconds):
@@ -123,10 +125,11 @@ class MySQLEmployeeRepository:
                 await connection.begin()
                 try:
                     async with connection.cursor(aiomysql.DictCursor) as cursor:
-                        await cursor.execute('SELECT userid,name,department_id,department_ids,work_profile FROM employees ORDER BY userid FOR UPDATE')
+                        await cursor.execute('SELECT userid,name,employment_status,department_id,department_ids,work_profile FROM employees ORDER BY userid FOR UPDATE')
                         current = {row['userid']: _refresh_target(row) for row in await cursor.fetchall()}
                         # 外部资料读取期间员工若被编辑或删除，本次重试，避免覆盖更新后的资料。
-                        if any(current.get(change.before.userid) != change.before for change in changes):
+                        targets=[change.before for change in changes]+resigned
+                        if any(current.get(target.userid) != target for target in targets):
                             raise PersonnelRefreshError('员工资料在刷新期间发生变化，请重新刷新',
                                 phase='database', database_updated=False, status_code=409)
                         for department in sorted(departments, key=lambda item: item.id):
@@ -134,10 +137,15 @@ class MySQLEmployeeRepository:
                                                  'ON DUPLICATE KEY UPDATE name=VALUES(name)',
                                                  (department.id, department.name))
                         for change in sorted(changes, key=lambda item: item.before.userid):
-                            await cursor.execute('UPDATE employees SET name=%s,department_id=%s,work_profile=%s,department_ids=%s WHERE userid=%s',
+                            # 查到并通过校验的员工恢复在职；状态与资料在同一事务提交。
+                            await cursor.execute("UPDATE employees SET name=%s,department_id=%s,work_profile=%s,department_ids=%s,employment_status='employed' WHERE userid=%s",
                                                  (change.name, change.department_id,
                                                   change.work_profile.model_dump_json(),
                                                   json.dumps(change.department_ids or [change.department_id]), change.before.userid))
+                        for target in sorted(resigned, key=lambda item: item.userid):
+                            # 明确查无此人仅更新状态，保留原姓名、部门、任职资料及权限。
+                            await cursor.execute("UPDATE employees SET employment_status='resigned' WHERE userid=%s",
+                                                 (target.userid,))
                     await connection.commit()
                 except BaseException:
                     await asyncio.shield(connection.rollback())

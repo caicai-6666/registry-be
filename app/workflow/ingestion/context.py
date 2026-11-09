@@ -18,6 +18,7 @@ from app.agent.passport_recommendation import build_passport_recommendation_work
 from app.agent.passport_recommendation.context import PassportRecommendationContext
 from app.service.resource_pdf import ResourcePDFService
 from app.service.pending_review import PendingReviewService
+from app.service.passport_recommendation import PassportRecommendationService
 from app.repository.resource import MySQLResourceRepository
 from app.repository.review import SQLiteReviewRepository
 
@@ -34,6 +35,7 @@ class IngestionWorkflowContext:
     pdf_service: ResourcePDFService | None = None
     passport_workflow: CompiledStateGraph = field(default_factory=build_passport_recommendation_workflow, repr=False)
     passport_context: PassportRecommendationContext = field(default_factory=PassportRecommendationContext)
+    passport_service: PassportRecommendationService | None = None
     pending_review_service: PendingReviewService | None = None
     resource_repository: MySQLResourceRepository | None = None
     reviews: SQLiteReviewRepository | None = None
@@ -57,6 +59,10 @@ class IngestionWorkflowContext:
             # 与判重共用 HNSW 服务及其锁；保留调用方显式提供的搜索和判断配置。
             self.passport_context = replace(
                 self.passport_context, resource_search=self.passport_context.resource_search or self.candidates,
+            )
+        if self.passport_service is None:
+            self.passport_service = PassportRecommendationService(
+                self.passport_context, self.pdf_service, workflow=self.passport_workflow,
             )
 
     def token(self) -> SecretStr:

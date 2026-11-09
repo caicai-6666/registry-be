@@ -3,12 +3,13 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.model.employee import EmployeeWorkProfile
+from app.model.employee import EmployeeWorkProfile, EmploymentStatus
 
 
 class EmployeeRefreshTarget(BaseModel):
     model_config=ConfigDict(frozen=True,extra='forbid')
     userid: str = Field(strict=True,min_length=1,max_length=128)
+    employment_status: EmploymentStatus = Field(description='刷新前持久化的在职状态，用于检测并发修改；不得用默认值掩盖缺列。')
     name: str | None = Field(default=None,strict=True,min_length=1,max_length=200)
     department_id: int = Field(strict=True,ge=0)
     department_ids: list[Annotated[int,Field(strict=True,ge=0)]] | None = Field(default=None, min_length=1, description='全部一级部门ID；历史NULL回退单值。')
@@ -61,10 +62,11 @@ class EmployeeRefreshChange(BaseModel):
 
 
 class PersonnelRefreshResult(BaseModel):
+    skipped_users: int = Field(default=0,ge=0,description='本次钉钉明确返回不存在、跳过资料采集并标记离职的员工数；保留原资料及权限。')
     refreshed_users: int = Field(ge=0,description='本次成功读取并完成数据库更新阶段的已有员工数。')
     refreshed_departments: int = Field(ge=0,description='本次刷新名称的所属顶级部门数。')
-    synced_names: int = Field(ge=0,description='本次已确认姓名和部门同步的员工数，字段名保留兼容，包含历史待重试项。')
-    pending_names: int = Field(ge=0,description='仍待确认姓名和部门同步的员工数，字段名保留兼容，成功时为零。')
+    synced_names: int = Field(ge=0,description='本次已确认资料及在职状态同步的员工数，含仅同步离职状态和历史待重试项；字段名保留兼容。')
+    pending_names: int = Field(ge=0,description='仍待确认资料及在职状态同步的员工数，字段名保留兼容，成功时为零。')
 
 
 class PersonnelRefreshError(RuntimeError):

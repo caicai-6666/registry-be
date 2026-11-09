@@ -63,7 +63,7 @@ MySQL 正式资源不保存消息 ID、offset 或来源审核员。审核通过�
 | `name` | 文件名称，最多 200 字符，历史缺失时为空。 |
 | `abstract` | 文件摘要，最多 10000 字符，历史缺失时为空。 |
 | `embedding` | 摘要向量，JSON 数组文本，尚未生成时为空。 |
-| `passport_recommendations` | `{passport, reason}` 推荐列表，JSON 数组文本；NULL 表示未推荐，`[]` 表示已推荐但无候选。 |
+| `passport_recommendations` | `{passport, reason}` 推荐列表，JSON 数组文本；NULL 表示未推荐，`[]` 表示无有效推荐，可能为无候选、均不推荐或全部组判断失败。 |
 | `file_level` | INTEGER，可空且必须是整数。新批准时必填，决定预留后冻结；待审、拒绝及未知历史为 NULL。 |
 | `passport` | 人工最终通行证数组，JSON 文本；每项最多 512 字符，新批准时非空，拒绝为 `[]`，尚未决定和历史未知为 NULL。 |
 
@@ -74,6 +74,8 @@ MySQL 正式资源不保存消息 ID、offset 或来源审核员。审核通过�
 旧实现可能只写入 `source_reviewer` 而留下空 `applicant`。列表和历史使用 `COALESCE(applicant,source_reviewer)` 返回申请人，不改写记录；原消息重投仍按来源身份核对，待审重投或首次人工决定时补齐申请人，使批准后 MySQL 正式资源得到正确申请人。非空历史申请人不覆盖，已确定结论不重置；保留旧列兼容历史，不执行删列或批量迁移。
 
 待审核原文件保存到 `{REVIEW_LOG_ROOT}/tmp-file/ingestion/{source_platform}/{file_url}`，不把 PDF 字节或页面图片塞进 SQLite。工作流持久化前验证向量与推荐条目，并保存完整 JSON 结果；后台接收服务已运行完整工作流，新待审申请保存向量与完整推荐列表。历史记录可能保留 NULL，本次切换不自动回填。
+
+[手动重新推荐](../../api/ingestion-review.md#重新推荐并保存通行证)复用已有字段，仅在待审状态、人工决定为空且 `updated_at` 与输入快照一致时原子替换推荐并更新时间；不变更最终 `passport` 或审核结论。该操作无需表结构迁移。
 
 `(source_platform, source_id)` 对 `pending` 入库记录建立部分唯一索引，防止同平台同源并发产生多条待审核申请；缺失源 ID 不占用名额。不同消息命中既有 pending 申请时走自动拒绝，原申请不被覆盖。已入库和待删除文件的拦截通过只读查询正式资源完成。
 

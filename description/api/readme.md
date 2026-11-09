@@ -23,6 +23,7 @@
 | [可信后台代用户获取正式文件原件](resource.md#可信后台代用户获取正式文件原件) | `POST` | `/knowledge-accumulation/registry/api/resource/service-authorized-file/{resource_id}` |
 | [获取待入库审核列表](ingestion-review.md#获取待入库审核列表) | `GET` | `/knowledge-accumulation/registry/api/ingestion-review/list` |
 | [按审核员获取入库审核历史](ingestion-review.md#按审核员获取入库审核历史) | `GET` | `/knowledge-accumulation/registry/api/ingestion-review/history` |
+| [重新推荐并保存通行证](ingestion-review.md#重新推荐并保存通行证) | `POST` | `/knowledge-accumulation/registry/api/ingestion-review/{review_id}/recommendations` |
 | [确定入库最终审核结果](ingestion-review.md#确定入库最终审核结果) | `POST` | `/knowledge-accumulation/registry/api/ingestion-review/{review_id}/decision` |
 | [获取待删除审核列表](deletion-review.md#获取待删除审核列表) | `GET` | `/knowledge-accumulation/registry/api/deletion-review/list` |
 | [按审核员获取删除审核历史](deletion-review.md#按审核员获取删除审核历史) | `GET` | `/knowledge-accumulation/registry/api/deletion-review/history` |

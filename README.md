@@ -195,6 +195,8 @@ docker compose ps
 
 Compose 使用命名卷持久化 MySQL 和 registry 运行数据。本机文件不会自动进入容器卷；旧库不会因重建镜像自动补列，具体见[人员数据初始化边界](description/architecture/data/employee.md#初始化与接入边界)。同一平台身份只运行一个后端实例。
 
+发布包含员工在职状态与手动通行证推荐的版本前，先完成[本次上线兼容性检查](description/capability/application/runtime.md#员工状态与手动推荐上线检查)：共享人员库必须包含 `employment_status` 及 `employed`／`resigned` 约束，中间件支持该字段的更新与回执，前端与网关对齐手动推荐接口。新建空卷也需核对部署初始化脚本，不能只检查已有开发数据库。当前手动推荐仍为同步 HTTP，尚未实现持久后台任务或重启恢复。
+
 ---
 
 ## 接口与认证

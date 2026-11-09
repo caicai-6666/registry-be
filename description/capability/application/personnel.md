@@ -18,9 +18,9 @@
 
 [用户授权管理](user-access.md)在单一事务中保存指定用户的文件等级和管理员关系，再即时增量同步中间件；省略的平台保留，失败可重复提交重试。
 
-[员工资料刷新](personnel-refresh.md)使用 registry 独立 DINGTALK_* 通讯录配置，管理员手动更新已有员工的姓名、部门及任职资料；每次刷新登记全部目标，并在 MySQL 提交后同步当前姓名和全部部门名称；任职资料只保存在本地，不触发全表注册或登录。
+[员工资料刷新](personnel-refresh.md)使用 registry 独立 DINGTALK_* 通讯录配置，管理员手动更新已有员工的姓名、部门、任职资料及在职状态；每次刷新登记全部目标，并在 MySQL 提交后同步当前资料与状态，钉钉明确不存在时标记离职并只同步状态；任职资料只保存在本地，不触发全表注册或登录。
 
-[用户列表](../../api/user.md#获取用户列表)只读取 employees 的 userid、name、avatar_url、department_id、department_ids、platform_permissions 六个字段，不关联部门或管理员表；部门名称由前端匹配，头像路径转为文件名，权限 JSON 返回对象。
+[用户列表](../../api/user.md#获取用户列表)只读取 employees 的 userid、name、avatar_url、department_id、department_ids、platform_permissions、employment_status 七个字段，不关联部门或管理员表；部门名称由前端匹配，头像路径转为文件名，权限 JSON 返回对象。
 
 [部门列表](../../api/user.md#获取部门列表)读取 MySQL departments，返回 ID 和名称，按 ID 排序；仅注册中心管理员可访问，不触发钉钉同步。
 

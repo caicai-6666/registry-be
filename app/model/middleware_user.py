@@ -1,11 +1,12 @@
 """中间件用户资料及登录查询的精确数据契约。"""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, StringConstraints, BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
 
 
 PlatformCode = Annotated[str, Field(pattern=r'^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$')]
+EmploymentStatus = Literal['employed', 'resigned']
 
 
 def reject_duplicate_departments(values: list[str]) -> list[str]:
@@ -35,6 +36,15 @@ class MiddlewareUserInfo(MiddlewareUserKey):
     username: str = Field(min_length=1, strict=True)
     permissions: dict[PlatformCode, StrictInt]
     departments: Departments = Field(default_factory=list, description="全部部门名称；旧资料或旧响应省略时为空列表，不表示权限。")
+    employment_status: EmploymentStatus | None = Field(default=None,
+        description='员工在职状态：employed 在职，resigned 离职；旧响应可省略表示未知，不接受显式 null。')
+
+    @field_validator('employment_status')
+    @classmethod
+    def reject_null_status(cls, value):
+        if value is None:
+            raise ValueError('用户资料在职状态不得为 null')
+        return value
 
     @field_validator('username')
     @classmethod
@@ -48,6 +58,8 @@ class MiddlewareUserPatch(MiddlewareUserKey):
     username: str | None = Field(default=None, min_length=1, strict=True)
     permissions: dict[PlatformCode, StrictInt] | None = None
     departments: Departments | None = Field(default=None, description="省略保留原部门，[]清空，提供列表则整体替换；不得显式传null。")
+    employment_status: EmploymentStatus | None = Field(default=None,
+        description='需要更新的在职状态：employed 在职，resigned 离职；省略保留原值，不接受显式 null。')
 
     @model_validator(mode='after')
     def validate_changes(self):
@@ -65,6 +77,8 @@ class MiddlewareUserLoginStatus(BaseModel):
     userid: str | None = Field(strict=True, min_length=1)
     username: str | None = Field(strict=True, min_length=1, description="中央当前用户名；离线时必须为 null。")
     departments: Departments | None = Field(default=None, description="有效登录返回部门名称列表，无部门为[]；无效登录为null。")
+    employment_status: EmploymentStatus | None = Field(default=None,
+        description='有效登录返回 employed 或 resigned，离线返回 null；兼容旧响应省略，不改变登录或权限判定。')
     is_logged_in: StrictBool
     ttl: int = Field(strict=True, ge=0)
 
@@ -78,6 +92,8 @@ class MiddlewareUserLoginStatus(BaseModel):
 
     @model_validator(mode='after')
     def validate_session(self):
+        if 'employment_status' in self.model_fields_set and ((self.employment_status is not None) != self.is_logged_in):
+            raise ValueError('在职状态必须与有效或离线登录响应一致')
         # 离线必须明确返回 null，不能把旧 userid 误当成有效身份。
         if self.is_logged_in:
             if self.departments is None or self.ttl <= 0 or self.userid is None or not self.userid.strip() or self.username is None or not self.username.strip():

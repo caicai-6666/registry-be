@@ -1,6 +1,7 @@
 """知识沉淀注册中心后端的 ASGI 应用入口与服务生命周期。"""
 
 import os
+import logging
 
 # 路由与头像代理在导入时读取前缀，必须先设置，不能依赖热重载子进程重新导入。
 if __name__ == "__main__":
@@ -65,6 +66,7 @@ from app.service.deletion_consumer import DeletionConsumerService
 from app.service.ingestion_consumer import IngestionConsumerService
 from app.service.embedding import EmbeddingService
 from app.service.pending_review import PendingReviewService
+from app.service.passport_recommendation import PassportRecommendationService
 from app.service.resource_candidates import ReadyResourceSearch
 from app.service.resource_pdf import ResourcePDFService
 from app.service.middleware_session import MiddlewareSessionService
@@ -173,33 +175,46 @@ def create_app(
             application.state.file_level_adjustment_service = FileLevelAdjustmentService(
                 repository, adjustment_logs, service, client, timeout_seconds=middleware.request_timeout_seconds)
             reviews = SQLiteReviewRepository(sqlite)
-            review_service = IngestionReviewService(reviews, repository, files, service, client,
-                timeout_seconds=middleware.request_timeout_seconds, retry_interval_seconds=middleware.retry_interval_seconds)
-            application.state.ingestion_review_service = review_service
-            deletion_reviews = SQLiteDeletionReviewRepository(sqlite)
-            deletion_review_service = DeletionReviewService(deletion_reviews, repository, files, service, client,
-                timeout_seconds=middleware.request_timeout_seconds, retry_interval_seconds=middleware.retry_interval_seconds)
-            application.state.deletion_review_service = deletion_review_service
-            if ingestion.enabled and middleware.enabled:
+            recommendation_service = None
+            try:
                 embedding_config = load_embedding_settings()
                 model_config = load_mllm_settings()
-                comparison_config = load_file_deduplication_settings()
                 passport_config = load_passport_recommendation_settings()
                 pdf_config = load_pdf_render_settings()
+            except ValueError:
+                # 自动消费依赖智能处理，保持配置错误时启动失败；纯审核服务仍可启动并返回明确 503。
+                if ingestion.enabled and middleware.enabled:
+                    raise
+                logging.getLogger(__name__).warning("手动通行证推荐未装配：模型或搜索配置不完整或不合法")
+            else:
+                # 推荐能力独立于消费开关装配；客户端只在使用时联网，共用 HTTP 配额与 HNSW 锁。
                 embeddings = EmbeddingService(embedding_config)
                 resources.push_async_callback(embeddings.close)
                 mllm = MLLMClient(model_config)
                 resources.push_async_callback(mllm.close)
                 candidates = ReadyResourceSearch(repository, model_name=embedding_config.model,
                                                  dimensions=embedding_config.dimensions, embeddings=embeddings)
+                pdf_service = ResourcePDFService(ingestion_settings=ingestion, render_settings=pdf_config)
+                passport_context = PassportRecommendationContext(mllm=mllm, resource_search=candidates,
+                                                                 search_settings=passport_config)
+                recommendation_service = PassportRecommendationService(passport_context, pdf_service)
+            review_service = IngestionReviewService(reviews, repository, files, service, client,
+                timeout_seconds=middleware.request_timeout_seconds, retry_interval_seconds=middleware.retry_interval_seconds,
+                recommendations=recommendation_service)
+            application.state.ingestion_review_service = review_service
+            deletion_reviews = SQLiteDeletionReviewRepository(sqlite)
+            deletion_review_service = DeletionReviewService(deletion_reviews, repository, files, service, client,
+                timeout_seconds=middleware.request_timeout_seconds, retry_interval_seconds=middleware.retry_interval_seconds)
+            application.state.deletion_review_service = deletion_review_service
+            if ingestion.enabled and middleware.enabled:
+                comparison_config = load_file_deduplication_settings()
                 context = IngestionWorkflowContext(
                     middleware=client, sessions=service, embeddings=embeddings,
                     candidates=candidates, settings=ingestion,
                     resource_repository=repository, reviews=reviews,
-                    pdf_service=ResourcePDFService(ingestion_settings=ingestion, render_settings=pdf_config),
+                    pdf_service=pdf_service,
                     deduplication_context=FileDeduplicationContext(mllm=mllm, settings=comparison_config),
-                    passport_context=PassportRecommendationContext(mllm=mllm, resource_search=candidates,
-                                                                   search_settings=passport_config),
+                    passport_context=passport_context, passport_service=recommendation_service,
                     pending_review_service=PendingReviewService(repository, files.ingestion,
                         max_file_bytes=ingestion.max_file_bytes, reviews=reviews),
                     request_timeout_seconds=middleware.request_timeout_seconds,

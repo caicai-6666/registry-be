@@ -19,20 +19,21 @@
 
 **认证方式：** header `Authorization: Bearer <access_token>`，要求中央登录有效且为 registry 管理员。
 
-**请求参数：** 无 path、query 参数或请求体，不分页、不按登录状态过滤。
+**请求参数：** 无 path、query 参数或请求体，不分页、不按登录或在职状态过滤，在职与离职员工均返回。
 
 **成功响应：** `200 application/json`，携带 `Cache-Control: no-store`：
 
 ```json
-[{"userid":"employee-001","name":"张三","avatar_url":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.webp","department_id":1,"department_ids":[1],"platform_permissions":{"registry":0}}]
+[{"userid":"employee-001","name":"张三","employment_status":"employed","avatar_url":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.webp","department_id":1,"department_ids":[1],"platform_permissions":{"registry":0}}]
 ```
 
-每项包含以下六个字段：
+每项包含以下七个字段：
 
 | 字段 | 类型与含义 |
 | --- | --- |
 | `userid` | 员工唯一字符串标识，区分大小写。 |
 | `name` | 员工姓名，未补全为 null；沿用数据库字段名，不改为 username。 |
+| `employment_status` | 在职状态字符串：`employed` 在职，`resigned` 离职；必填且不为 null，不代表登录状态或权限。 |
 | `avatar_url` | 头像文件名，无头像为 null；读取使用知识后端头像接口。 |
 | `department_id` | 旧版兼容部门 ID，不代表唯一或主要归属。 |
 | `department_ids` | 全部一级部门 ID，前端与部门列表关联展示。 |
@@ -95,7 +96,7 @@ curl 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/user/department
 
 ## 刷新已有员工资料
 
-`POST /knowledge-accumulation/registry/api/user/refresh-all`，一次刷新 MySQL 已有员工的钉钉姓名、顶级部门归属、部门名称及任职资料（直属主管 userid、职位），随后增量同步本次全部目标员工的姓名和完整部门名称列表。
+`POST /knowledge-accumulation/registry/api/user/refresh-all`，一次刷新 MySQL 已有员工的钉钉姓名、顶级部门归属、部门名称及任职资料（直属主管 userid、职位），同时维护在职状态，随后增量同步姓名、完整部门名称列表和状态；明确不存在的员工标记离职并只同步状态。
 
 **认证方式：** header `Authorization: Bearer <access_token>`，要求中央登录有效且具有 registry 管理权限。钉钉应用凭据只从后端配置读取，不能由调用方传入。
 
@@ -104,10 +105,10 @@ curl 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/user/department
 **成功响应：** `200 application/json`，`Cache-Control: no-store`：
 
 ```json
-{"refreshed_users":12,"refreshed_departments":3,"synced_names":12,"pending_names":0}
+{"refreshed_users":12,"skipped_users":1,"refreshed_departments":3,"synced_names":13,"pending_names":0}
 ```
 
-refreshed_users是本次处理范围，refreshed_departments是不同顶级部门数，synced_names是本次确认姓名和部门同步的员工数（可包含历史失败项），不等于所有员工都发生了修改。`synced_names` 与 `pending_names` 保留旧字段名，均按姓名和部门的员工同步项计数。无员工且无历史待同步项时返回各项为 0，不导入其他钉钉员工。
+refreshed_users是本次成功刷新人数，不含跳过员工；skipped_users是钉钉明确返回不存在、跳过资料采集并成功标记离职的人数；refreshed_departments是不同顶级部门数，synced_names是本次确认资料或状态同步的员工数（含仅同步离职状态及历史失败项），不等于所有员工都发生了修改。`synced_names` 与 `pending_names` 保留旧字段名，均按资料及状态的员工同步项计数。无员工且无历史待同步项时返回各项为 0，不导入其他钉钉员工。
 
 **错误响应：**
 
@@ -115,14 +116,14 @@ refreshed_users是本次处理范围，refreshed_departments是不同顶级部�
 | --- | --- |
 | `401` | 未登录或用户 token 失效。 |
 | `403` | 非 registry 管理员。 |
-| `409` | 同实例已有刷新执行，或员工姓名、部门或任职资料在资料读取期间发生并发修改。 |
+| `409` | 同实例已有刷新执行，或员工姓名、部门、任职资料或在职状态在资料读取期间发生并发修改。 |
 | `422` | 传入了 query 或请求体。 |
-| `503` | 缺少应用配置、钉钉/数据库/中间件不可用、部门无法确定、超时或姓名/部门同步尚未完成。 |
+| `503` | 缺少应用配置、钉钉/数据库/中间件不可用、部门无法确定、超时或资料/状态同步尚未完成。 |
 
 业务503示例：
 
 ```json
-{"detail":{"message":"数据库已更新，部分姓名或部门尚未同步；再次刷新会重试","phase":"middleware_sync","database_updated":true,"pending_names":1}}
+{"detail":{"message":"数据库已更新，部分资料或在职状态尚未同步；再次刷新会重试","phase":"middleware_sync","database_updated":true,"pending_names":1}}
 ```
 
 完整失败字段见[刷新结果契约](../architecture/data/personnel-refresh.md#成功与失败结果)。database_updated为false表示未执行MySQL变更，true表示数据库阶段已完成，null表示提交结果无法确认；不要将503统一当作数据库未更新。认证层错误沿用通用401/403/503结构。
@@ -134,7 +135,7 @@ curl --request POST 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/
   -H 'Authorization: Bearer replace-with-user-access-token'
 ```
 
-**行为与边界：** 所有员工资料通过校验后才提交单一MySQL事务，保留头像、权限和管理员关系；遇到无法读取的员工不自动删除。本次全部目标及历史待同步项调用中间件 user/update，body为userid、username、departments，不携带permissions。不调用任何full-table或登录写入接口。部门归属变化、部门改名及中央旧资料缺部门均通过刷新同步；失败标记持久保存，下次手动刷新回读当前姓名和部门重试。配置、部门归属、并发和恢复说明见[员工资料刷新](../capability/application/personnel-refresh.md)。
+**行为与边界：** 员工详情返回 errcode=60121 时跳过资料采集，标记 `resigned`，保留原姓名、部门、任职资料、头像、权限和管理员关系；查到并通过资料校验时标记 `employed`，包括恢复已离职员工。全部员工不存在也会提交状态更新并同步中间件。权限不足、超时、HTTP 404 或其他读取错误仍使本轮失败，数据库阶段前不提交任何资料或状态。有效资料与离职状态在单一 MySQL 事务中提交，并检测状态等字段的并发修改。提交后，在职员工向中间件 user/update 发送 userid、username、departments、employment_status，离职员工只发送 userid、employment_status；不携带 permissions，不调用 full-table 或登录写入接口。所有目标均保留持久待同步任务，只有中央确认状态一致后才移除；失败时再次刷新回读当前数据库值重试。状态本身不撤权、不删除员工或撤销登录。配置与恢复见[员工资料刷新](../capability/application/personnel-refresh.md)。
 
 
 ---

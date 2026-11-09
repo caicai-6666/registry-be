@@ -30,6 +30,10 @@ class _ApplicationToken(BaseModel):
     expireIn: int = Field(strict=True,gt=0)
 
 
+class DingTalkEmployeeNotFound(RuntimeError):
+    """钉钉明确返回员工不存在；不等同于权限不足或请求失败。"""
+
+
 class DingTalkClient:
     def __init__(self,settings: DingTalkSettings,*,transport: httpx.AsyncBaseTransport | None=None):
         if not settings.configured:raise ValueError('钉钉应用凭据尚未配置')
@@ -76,6 +80,9 @@ class DingTalkClient:
                     return payload['result']
             except (httpx.HTTPError,ValueError,TypeError):
                 raise AuthUnavailable('钉钉通讯录查询暂不可用') from None
+            # 仅员工详情的明确不存在错误可跳过；部门错误、HTTP 404 和权限错误仍需报错。
+            if path == '/topapi/v2/user/get' and code == 60121:
+                raise DingTalkEmployeeNotFound('钉钉员工不存在')
             if code in (40014,42001,88) and attempt == 0:
                 async with self._lock:
                     if self._token is not None and self._token.get_secret_value() == token:self._token=None

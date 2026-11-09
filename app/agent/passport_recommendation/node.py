@@ -1,6 +1,7 @@
 """搜索聚合、组级并发判断及完整结果收束，不伪造未知结论。"""
 
 import asyncio
+import logging
 
 from langgraph.runtime import Runtime
 
@@ -11,9 +12,11 @@ from app.infrastructure.mllm import MLLMClient
 from app.agent.passport_recommendation.search import PassportGroupSearch
 from app.config.passport_recommendation import load_passport_recommendation_settings
 from app.agent.passport_recommendation.state import (
-    PassportGroup, PassportGroupDecision, PassportGroupJudgment,
+    PassportGroup, PassportGroupDecision, PassportGroupFailure, PassportGroupJudgment,
     PassportRecommendation, PassportRecommendationInput, PassportRecommendationResult, PassportRecommendationState,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def validated_groups(values) -> list[PassportGroup]:
@@ -47,13 +50,13 @@ async def search_and_aggregate(state: PassportRecommendationState, runtime: Runt
         ).search
     groups = validated_groups(await search(file))
     # 每次请求重置局部结果，不继承此前请求的分组或判断。
-    return {"file": file, "groups": groups, "decisions": []}
+    return {"file": file, "groups": groups, "decisions": [], "failed_groups": []}
 
 
 async def map_reduce_judgments(state: PassportRecommendationState, runtime: Runtime[PassportRecommendationContext]) -> PassportRecommendationState:
     groups = validated_groups(state["groups"])
     if not groups:
-        return {"decisions": []}
+        return {"decisions": [], "failed_groups": []}
     ctx = runtime.context
     if ctx is None:
         raise RuntimeError("map_reduce_judgments：缺少运行依赖")
@@ -63,19 +66,28 @@ async def map_reduce_judgments(state: PassportRecommendationState, runtime: Runt
     async def run(judgment):
         limit = asyncio.Semaphore(ctx.judgment_concurrency)
 
-        async def judge(group):
+        async def judge(index, group):
             async with limit:
-                bounds = {"group_file_count": len(group.files)}
-                if pdf is not None:
-                    bounds["current_page_count"] = pdf.page_count
-                result = PassportGroupJudgment.model_validate(await judgment(file, group), context=bounds)
-                # 通行证来自绑定的组，不让模型改写或创建通行证身份。
-                return PassportGroupDecision(passport=group.passport, **result.model_dump())
+                try:
+                    bounds = {"group_file_count": len(group.files)}
+                    if pdf is not None:
+                        bounds["current_page_count"] = pdf.page_count
+                    result = PassportGroupJudgment.model_validate(await judgment(file, group), context=bounds)
+                    # 通行证来自绑定的组，不让模型改写或创建通行证身份。
+                    return PassportGroupDecision(passport=group.passport, **result.model_dump())
+                except Exception as error:
+                    # 单组请求、预算及输出验收失败仅跳过该组；取消等 BaseException 继续传播。
+                    # 日志只输出组序号和异常类型，不回显业务通行证、模型正文或凭据。
+                    logger.warning("通行证组判断失败，已跳过：group_index=%s error_type=%s", index, type(error).__name__)
+                    return PassportGroupFailure(passport=group.passport, error_type=type(error).__name__)
 
-        # 失败时取消并等待其他组，避免请求尚未结束就关闭共享客户端或发布部分结果。
+        # 普通组级失败已转为显式记录；等待其他组完成，整体取消仍取消并等待子任务。
         async with asyncio.TaskGroup() as tasks:
-            pending = [tasks.create_task(judge(group)) for group in groups]
-        return {"decisions": [task.result() for task in pending], "current_pdf": pdf}
+            pending = [tasks.create_task(judge(index, group)) for index, group in enumerate(groups, 1)]
+        results = [task.result() for task in pending]
+        return {"decisions": [item for item in results if isinstance(item, PassportGroupDecision)],
+                "failed_groups": [item for item in results if isinstance(item, PassportGroupFailure)],
+                "current_pdf": pdf}
 
     if ctx.group_judge is not None:
         return await run(ctx.group_judge)
@@ -103,19 +115,31 @@ def collect_results(state: PassportRecommendationState) -> PassportRecommendatio
     if type(state.get("decisions")) is not list:
         raise ValueError("并发判断必须明确返回完整结果列表")
     decisions = [PassportGroupDecision.model_validate(value) for value in state["decisions"]]
+    failures = state.get("failed_groups", [])
+    if type(failures) is not list:
+        raise ValueError("失败组必须明确返回列表")
+    failures = [PassportGroupFailure.model_validate(value) for value in failures]
     by_passport = {item.passport: item for item in decisions}
-    if len(by_passport) != len(decisions) or set(by_passport) != {group.passport for group in groups}:
-        raise ValueError("每个通行证组必须恰好有一个判断，不能遗漏、重复或混入其他组")
+    failed_passports = {item.passport for item in failures}
+    if (len(by_passport) != len(decisions) or len(failed_passports) != len(failures)
+            or set(by_passport) & failed_passports
+            or set(by_passport) | failed_passports != {group.passport for group in groups}):
+        raise ValueError("每个通行证组必须恰好有一个有效判断或失败记录，不能遗漏、重复或混入其他组")
     recommendations = []
     pdf = state.get("current_pdf")
     for group in groups:
+        if group.passport in failed_passports:
+            continue
         bounds = {"group_file_count": len(group.files)}
         if pdf is not None:
             bounds["current_page_count"] = pdf.page_count
-        # 最终出口按实际绑定组验收；全部判断有效后才返回，不能跳过无效的不推荐判断。
+        # 最终出口仍严格验收有效判断；不得将未登记的坏结果当作失败组静默遗漏。
         decision = PassportGroupDecision.model_validate(by_passport[group.passport], context=bounds)
         if decision.should_recommend:
             # 新建对外条目，仅保留已有通行证及审核者阅读的最终理由，排序沿用组顺序。
             recommendations.append(PassportRecommendation(passport=group.passport, reason=decision.reason))
     result = PassportRecommendationResult(recommendations=recommendations)
+    if failures:
+        logger.warning("通行证推荐降级完成：total_groups=%s failed_groups=%s recommendations=%s",
+                       len(groups), len(failures), len(recommendations))
     return {"recommendations": result.recommendations}

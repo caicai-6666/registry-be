@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | [获取待入库审核列表](#获取待入库审核列表) | `GET` | `/knowledge-accumulation/registry/api/ingestion-review/list` |
 | [按审核员获取入库审核历史](#按审核员获取入库审核历史) | `GET` | `/knowledge-accumulation/registry/api/ingestion-review/history` |
+| [重新推荐并保存通行证](#重新推荐并保存通行证) | `POST` | `/knowledge-accumulation/registry/api/ingestion-review/{review_id}/recommendations` |
 | [确定入库最终审核结果](#确定入库最终审核结果) | `POST` | `/knowledge-accumulation/registry/api/ingestion-review/{review_id}/decision` |
 
 ---
@@ -57,7 +58,7 @@
 | `applicant` | string 或 null | 来源平台发起入库申请的人，当前由上游消息的 `reviewer` 映射；历史明确的申请人值优先保留。 |
 | `applicant_note` | string | 申请人备注，可为空字符串。 |
 | `requested_at` | string | 带时区的 UTC 申请时间。 |
-| `passport_recommendations` | array 或 null | `{passport, reason}` 推荐条目；`[]` 表示无推荐，null 表示历史申请未推荐。 |
+| `passport_recommendations` | array 或 null | `{passport, reason}` 推荐条目；`[]` 表示无有效推荐，可能是无候选、均不推荐或全部组判断失败；null 表示历史申请未推荐。失败详情不在当前接口返回。 |
 
 没有待审申请时返回 `[]`。不返回摘要向量、磁盘路径或数据库连接信息。
 
@@ -189,6 +190,75 @@ curl --get 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/ingestion
 按审核时间倒序，同一时间按审核 ID 倒序；历史审核时间为空的记录排在最后。反馈尚未发布但本地处理已完成的记录仍返回，`result_message_id` 为 null；该值也可能表示历史凭据缺失，不能据此认定旧记录尚未发送。
 
 不查询 MySQL、不读取原件、不触发中间件发布或恢复操作。正式资源后来删除也不影响审核历史。申请人为空但 SQLite 保留了上游发起人时，返回映射后的 `applicant`；不再额外返回 `source_reviewer`。旧记录缺少文件等级、通行证、审核时间或推荐列表时保留 null；不从其他存储推测或补写。按“注册中心自动审核员”查询时可返回自动拒绝历史。
+
+---
+
+## 重新推荐并保存通行证
+
+`POST /knowledge-accumulation/registry/api/ingestion-review/{review_id}/recommendations`，针对尚未确定人工决定的待审申请，重新检索当前正式资源、运行通行证推荐并替换已保存的推荐列表。
+
+### 认证方式
+
+使用知识后端签发的 `Authorization: Bearer <access_token>`，并要求当前用户具有注册中心管理员权限。
+
+### 请求参数
+
+| 位置 | 参数 | 类型 | 必填 | 约束 |
+| --- | --- | --- | --- | --- |
+| header | `Authorization` | string | 是 | Bearer 用户 token。 |
+| path | `review_id` | integer | 是 | SQLite 入库审核 ID，范围 `1` 至 `9223372036854775807`，不是正式资源 ID。 |
+
+无 query 参数，无请求体。后端读取待审记录的名称、摘要、已有摘要向量和暂存原件，前端不提交或覆盖这些输入。
+
+### 成功响应
+
+`200 OK`，`application/json`，`Cache-Control: no-store`。仅在推荐列表已保存后返回：
+
+```json
+{
+  "id": 12,
+  "passport_recommendations": [
+    {"passport": "existing-passport", "reason": "属于同一采购事项"}
+  ]
+}
+```
+
+`id` 为审核记录 ID；`passport_recommendations` 是本次完整替换后的推荐数组，条目与[待审列表](#获取待入库审核列表)一致。刷新待审列表可读到同一结果。空数组同样会保存，可能表示无候选、均不推荐或全部组判断失败；失败详情不在接口中返回。
+
+### 错误响应
+
+| 状态码 | 条件 | detail |
+| --- | --- | --- |
+| `401` | 未登录或 token 无效 | `access-token 无效或已过期`。 |
+| `403` | 当前用户不是注册中心管理员 | `无权管理当前平台`。 |
+| `404` | 审核记录或暂存原件不存在 | `入库审核申请不存在` 或 `待审文件原件不存在`。 |
+| `409` | 已确定决定或已完成审核 | `该申请已确定审核决定，不能重新推荐`。 |
+| `409` | 同一申请已有推荐正在执行 | `该申请正在推荐中，请勿重复发起`。 |
+| `409` | 历史记录缺少必要输入 | `申请缺少名称、摘要、向量或原件信息，不能重新推荐`。 |
+| `409` | 推理期间申请已被审核或更新 | `申请已审核或发生变更，请刷新后重试`。 |
+| `422` | 审核 ID 不符合约束 | 参数校验错误列表。 |
+| `503` | 中央认证、管理员或审核依赖不可用 | 与待审列表相同的依赖错误。 |
+| `503` | 推荐配置不可用 | `通行证推荐服务未配置，请检查模型与搜索配置`。 |
+| `503` | 检索、公共 PDF 准备、输入校验或存储失败 | `入库审核服务暂不可用，请稍后重试`。 |
+
+普通组级模型失败沿用推荐子图容错，返回有效推荐或空数组，不直接产生 `503`。检索与公共处理失败不会覆盖旧推荐；并发冲突不会覆盖其他请求已更新的结果。
+
+### 请求示例
+
+替换审核 ID 与用户 token；部署使用 `/dev` 前缀时，在完整路径前补上 `/dev`：
+
+```bash
+curl --request POST 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/ingestion-review/12/recommendations' \
+  -H 'Authorization: Bearer 替换为当前模式的token'
+```
+
+### 行为与边界
+
+这是等待计算和保存完成的同步 HTTP 接口，没有后台任务 ID 或轮询接口。前端点击后显示进行中并禁用重复点击，收到成功响应后更新推荐区域；不自动改动审核员已选择的最终通行证。推荐期间允许提交审核，迟到的推荐结果会被丢弃并返回 `409`。
+
+模型调用可能持续数分钟，前端及反向代理需要为该请求设置足够的等待时间。网络中断或网关超时不能证明后端已取消或未保存，应先刷新列表；若重试收到“正在推荐”，等待后再查看结果。进程重启不恢复未完成的手动推荐。
+
+本接口只更新推荐列表和记录更新时间，不重新判重、不创建正式资源、不生成最终通行证、不触发 ACK 或审核反馈。消费开关关闭时仍可使用，前提是模型、embedding、搜索配置及 MySQL 正常。历史缺失向量等必要输入不自动补齐。
 
 ---
 

@@ -1,4 +1,4 @@
-"""SQLite 仅保存待同步姓名和部门的 userid，不复制员工资料或权限。"""
+"""SQLite 仅保存待同步员工资料及在职状态的 userid，不复制资料或权限载荷。"""
 import asyncio
 from uuid import uuid4
 

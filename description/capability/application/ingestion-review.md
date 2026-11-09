@@ -29,6 +29,18 @@
 
 ---
 
+## 手动重新推荐
+
+`IngestionReviewService.recommend` 接收审核 ID，从 SQLite 和暂存目录获取已有名称、摘要、摘要向量与原件，调用 `PassportRecommendationService.recommend`，在保存成功后返回推荐列表。HTTP 契约和前端接入说明见[重新推荐并保存通行证](../../api/ingestion-review.md#重新推荐并保存通行证)。
+
+自动入库和手动入口复用同一个推荐服务、子图、模型客户端和检索服务；服务只负责输入输出校验与按需准备 PDF，审核记录的读取和写回仍由审核服务负责。模型与检索配置有效时，应用独立于后台消费开关装配此能力；消费未启用且智能配置缺失时，审核服务仍可启动，手动推荐返回明确 `503`。自动消费启用时仍要求智能配置合法。
+
+同一审核 ID 的手动请求使用进程内占用集合防重复，失败或取消后释放。读取快照与原件时短暂持有审核锁，模型计算时释放，避免阻塞人工审核。`SQLiteReviewRepository.replace_recommendations` 在写事务内核对 `status='pending'`、`decision IS NULL` 及原 `updated_at`，再原子替换 `passport_recommendations` 并更新时间。期间审核或其他更新会导致冲突，迟到结果不写回；不修改人工通行证、决定、审核人或发布凭据。
+
+逐组失败沿用[推荐子图容错](../../architecture/workflow/passport-recommendation/readme.md)，全部组失败也会保存空列表；检索、公共准备或保存失败则不覆盖旧结果。每次手动调用独立重新检索，不自动重试；当前同步 HTTP 实现不保存后台任务或恢复中断任务。进程内防重复遵循现有单实例、单 worker 部署边界，不能避免多进程重复模型开销；SQLite 版本校验仍阻止相互覆盖。
+
+---
+
 ## 并发与恢复
 
 同一进程内使用按审核 ID 的异步锁串行化人工提交、待审附件读取及恢复器。SQLite `BEGIN IMMEDIATE` 确保预留决定不能被不同意见覆盖；MySQL 唯一平台附件键与源身份键阻止正式资源重复建档。此前 MySQL 已提交但 SQLite 关联未保存时，仅复用全部入库快照一致的记录；差异视为冲突，不覆盖。
@@ -52,6 +64,8 @@ MySQL、SQLite、文件系统和消息中间件不构成统一事务。进程崩
 ---
 
 ## 验证
+
+手动推荐回归：`python -B -m unittest discover -s tests -p 'test_manual_passport_recommendation.py' -q`。使用真实 SQLite、暂存文件、推荐子图及 HTTP 路由，远端服务使用替身；覆盖写回与列表刷新、认证、部分和全部组失败、公共失败保留旧结果、重复点击、并发审核、取消及独立装配。测试目录为 `tests/tmp/` 并自动清理，不访问真实模型或业务数据库。
 
 ```bash
 python -m unittest tests.test_ingestion_review_api tests.test_sqlite tests.test_review_repository

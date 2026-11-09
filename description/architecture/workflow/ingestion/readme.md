@@ -50,11 +50,11 @@ flowchart TD
 | `compare_files` | 按平台与附件文件名读取候选 PDF，构造双方名称、摘要和页面对象，调用判重子图；只接受严格 boolean 和非空理由。 |
 | `reduce_comparisons` | 校验候选与结果对应完整，按任一重复的规则选择分支。 |
 | `publish_rejection` | 将命中文件 source_id 与智能体理由组织为 Markdown 审核意见，由固定审核员发布空通行证结果；仅确认发布后标记成功。 |
-| `recommend_passports` | 传入名称、摘要、已有向量及共享 PDF 页面；必要时延迟渲染，接收通行证及理由列表。 |
+| `recommend_passports` | 调用与手动重荐共用的 `PassportRecommendationService`，传入名称、摘要、已有向量及共享 PDF 页面；必要时延迟渲染，接收通行证及理由列表。 |
 | `persist_pending_review` | 调用持久化服务，保存原文件及向量、推荐理由，提交后返回资源 ID。 |
 | `acknowledge_request` | 拒绝凭据或完整 SQLite 待审核申请已保存后确认消费。 |
 
-判重子图通过工具循环形成已校验结论，失败返回未知；通行证推荐子图已实现跨平台 HNSW 搜索与通行证聚合、并发判断调度及结果收束。缺少搜索运行依赖时抛出 `RuntimeError`，非空组默认并发调用模型，预算、格式或证据校验失败时整体失败，不落盘、不 ACK。持久化行为见[待审核文件持久化](../../../capability/application/pending-review.md)。待审核原文件先保存到 `REVIEW_LOG_ROOT/tmp-file/ingestion`；审核通过后由人工入库审核服务转移到 resource，文件能力见[审核文件存储](../../../capability/infrastructure/review-file-storage.md)。当前拒绝分支不保存申请文件，不向 `resources` 插入申请记录；会保存 SQLite 审核意见和发布凭据。正常分支将完整待审核申请存入 SQLite，返回 `review_id` 后 ACK，审核通过前不写入 MySQL。正常分支在 ACK 前完成 SQLite 审核记录，契约见[审核表](../../data/review.md)。
+判重子图通过工具循环形成已校验结论，失败返回未知；通行证推荐子图已实现跨平台 HNSW 搜索与通行证聚合、并发判断调度及结果收束。缺少搜索运行依赖时抛出 `RuntimeError`，非空组默认并发调用模型，单组请求、预算、格式或证据校验失败时记录并跳过该组，保留其余有效推荐；全部组失败时以空推荐继续人工待审，待审落盘后才 ACK。搜索、共享 PDF 准备失败及取消仍不推进落盘和 ACK。持久化行为见[待审核文件持久化](../../../capability/application/pending-review.md)。待审核原文件先保存到 `REVIEW_LOG_ROOT/tmp-file/ingestion`；审核通过后由人工入库审核服务转移到 resource，文件能力见[审核文件存储](../../../capability/infrastructure/review-file-storage.md)。当前拒绝分支不保存申请文件，不向 `resources` 插入申请记录；会保存 SQLite 审核意见和发布凭据。正常分支将完整待审核申请存入 SQLite，返回 `review_id` 后 ACK，审核通过前不写入 MySQL。正常分支在 ACK 前完成 SQLite 审核记录，契约见[审核表](../../data/review.md)。
 
 ---
 
@@ -64,7 +64,7 @@ flowchart TD
 
 `comparison_results` 使用追加 reducer 汇总候选结果；其他状态按节点覆盖。任务并发上限默认 10，可通过配置调整。每个任务记录资源 ID、布尔结论、智能体理由或错误类型，不保存失败对话原文。命中的模型理由保留为 `duplicate_reason`，中间件拒绝说明仍按既定契约构造。
 
-推荐成功后，`passport_recommendations` 保留完整的 `{passport, reason}` 条目及顺序；`None` 表示尚未推荐，`[]` 表示明确无候选。推荐异常或无效输出不会进入保存与 ACK，详细契约由[推荐子图](../passport-recommendation/readme.md)维护。
+推荐完成后，`passport_recommendations` 保留有效的 `{passport, reason}` 条目及顺序；`None` 表示尚未推荐，`[]` 表示无有效推荐，包含全部组判断失败的降级情况。单组异常被隔离，检索、公共准备或最终完整性校验失败仍不进入保存与 ACK，详细契约由[推荐子图](../passport-recommendation/readme.md)维护。已保存申请可由管理员通过[手动推荐接口](../../../api/ingestion-review.md#重新推荐并保存通行证)更新推荐，消息重投仍不自动重跑。
 
 汇总在该批比较结束后执行：
 

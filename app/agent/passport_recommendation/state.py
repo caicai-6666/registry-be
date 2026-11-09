@@ -4,6 +4,7 @@ from typing import Annotated, NotRequired, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationInfo, field_validator, model_validator
 from app.model.pdf import PreparedPDF
+from app.model.passport import PassportValue
 
 VectorValue = Annotated[float, Field(strict=True, allow_inf_nan=False)]
 
@@ -47,7 +48,7 @@ class PassportRecommendation(BaseModel):
 class PassportRecommendationResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", revalidate_instances="always")
 
-    recommendations: list[PassportRecommendation] = Field(strict=True, description="按推荐顺序排列的通行证及理由列表；明确无候选时为空数组。")
+    recommendations: list[PassportRecommendation] = Field(strict=True, description="有效判断中明确推荐的通行证及理由；无候选、均不推荐或全部组判断失败时为空数组。")
 
     @field_validator("recommendations")
     @classmethod
@@ -149,6 +150,15 @@ class PassportGroupDecision(PassportGroupJudgment):
         return value
 
 
+class PassportGroupFailure(BaseModel):
+    """仅在子图内部记录组级失败，不伪造不推荐判断或保存异常正文。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", revalidate_instances="always")
+
+    passport: PassportValue = Field(description="程序绑定的失败组通行证，不由模型生成。")
+    error_type: str = Field(strict=True, min_length=1, description="失败异常类型，不包含异常正文、模型响应或凭据。")
+
+
 class PassportRecommendationInputState(TypedDict):
     file: PassportRecommendationInput
     current_pdf: NotRequired[PreparedPDF | None]
@@ -163,4 +173,5 @@ class PassportRecommendationState(TypedDict, total=False):
     current_pdf: PreparedPDF | None
     groups: list[PassportGroup]
     decisions: list[PassportGroupDecision]
+    failed_groups: list[PassportGroupFailure]
     recommendations: list[PassportRecommendation]

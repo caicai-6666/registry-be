@@ -23,6 +23,7 @@
 | --- | --- | --- |
 | `userid` | `VARCHAR(128)`，主键，区分大小写，非空且不允许首尾空格 | 钉钉提供的用户唯一 ID，不另设自增用户 ID。 |
 | `name` | `VARCHAR(200)`，历史允许 null，非空值不能全为空格 | 钉钉员工姓名，新初始化必须提供。 |
+| `employment_status` | `VARCHAR(16)`，ASCII、非空，默认 `employed`，枚举约束 | `employed` 在职，`resigned` 离职；与中间件和用户列表使用相同值。 |
 | `avatar_url` | `VARCHAR(64)`，ASCII，可为空 | 相对 data 的头像地址，格式为 `user/avatar/<32位随机标识>.webp`。 |
 | `department_id` | `BIGINT UNSIGNED`，非空，外键关联 `departments.id` | 旧版兼容投影，不代表唯一或主要部门。 |
 | `department_ids` | `JSON`，可空 | 全部一级部门 ID 的非空、去重数组；历史 NULL 回退为 `[department_id]`。 |
@@ -46,6 +47,16 @@
 首次员工初始化由知识后端的 `EmployeeOnboardingService` 从钉钉详情采集并与员工、部门在同一事务写入；已有员工再次登录不补采。本项目通过[手动刷新](../../capability/application/personnel-refresh.md)更新已有员工，钉钉未维护或返回空值时写入 null，可清除旧主管/职位，不保留过期任职资料。
 
 已有共享人员库缺少 `work_profile` 时，上线前需手工执行知识后端的[015 任职资料迁移](../../../../knowledge-accumulation-be/schema/015-employee-work-profile.sql)，为历史员工初始化两个 null。当前部署项目 `003-personnel.sql` 已为新空卷包含此字段和约束，新库不重复执行 `015`；已有卷不会重跑初始化，应用也不执行 DDL；缺列或字段非法时刷新失败，不静默跳过。数据库账号需具备 work_profile 的 SELECT/UPDATE 权限；初始化脚本不触发真实库迁移或批量刷新。
+
+---
+
+## 在职状态
+
+人员列表返回 `employment_status`，保留在职与离职员工；非法值、缺列或 null 不默认解释为在职。刷新目标同时读取原状态，MySQL 事务中将其纳入并发快照校验。
+
+[手动刷新](../../capability/application/personnel-refresh.md)读取钉钉已有员工详情：明确不存在时只标记 `resigned`，正常读取并校验完成时写入 `employed`，可以恢复此前离职的员工。网络、权限、部门或响应格式错误不推断离职。状态不清空权限、管理员关系或登录，其他认证和授权规则不因此改变。
+
+共享人员库须已具备统一取值的字段和约束，迁移来源为知识后端的 [022 在职状态迁移](../../../../knowledge-accumulation-be/schema/022-employee-employment-status.sql)。已有环境先核对实际列与约束，不重复执行 ADD COLUMN，也不将旧的 `departed` 值当作 `resigned` 隐式转换；应用不执行 DDL。数据库账号需具备该字段 SELECT/UPDATE 权限。仅中间件旧响应兼容省略状态，不适用于 MySQL 权威数据。
 
 ---
 

@@ -1,6 +1,6 @@
 # 待审核文件持久化
 
-> **用途：** 文件确认不重复、通行证推荐成功后，将原文件与完整申请保存到 SQLite，再由主图 ACK。待审核阶段不写入 MySQL。
+> **用途：** 文件确认不重复、通行证推荐流程完成（含组级失败降级）后，将原文件与完整申请保存到 SQLite，再由主图 ACK。待审核阶段不写入 MySQL。
 
 ---
 
@@ -34,7 +34,7 @@ context.pending_review_service = PendingReviewService(
 
 正式资源目录不会因待审核落盘写入新文件；审批通过后的文件晋升能力见[审核文件存储](../infrastructure/review-file-storage.md)。
 
-字段定义与正式入库边界见[审核表契约](../../architecture/data/review.md)。向量复用前置结果，明确无推荐保存 JSON `[]`；本服务不调用模型，也不创建正式 MySQL 文件记录。
+字段定义与正式入库边界见[审核表契约](../../architecture/data/review.md)。向量复用前置结果，无有效推荐时保存 JSON `[]`，其中可能包含全部组判断失败的降级情况；不代表模型全部判断为不推荐；本服务不调用模型，也不创建正式 MySQL 文件记录。
 
 ---
 

@@ -4,7 +4,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.model.middleware_user import PlatformCode
+from app.model.middleware_user import PlatformCode, EmploymentStatus
 
 
 class EmployeeWorkProfile(BaseModel):
@@ -29,6 +29,7 @@ class EmployeeInfo(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     userid: str = Field(strict=True, min_length=1, max_length=128, description="员工唯一 userid。")
+    employment_status: EmploymentStatus = Field(description="员工在职状态：employed 在职，resigned 离职；与登录状态及权限独立。")
     name: str | None = Field(default=None, strict=True, min_length=1, max_length=200,
                              description="员工姓名，未补全时为 null。")
     avatar_url: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}\.webp$",
