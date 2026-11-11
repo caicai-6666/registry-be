@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import re
+from contextvars import ContextVar
 from time import monotonic
 
 import httpx
@@ -10,6 +11,19 @@ from pydantic import BaseModel, Field, SecretStr
 from app.config.dingtalk import DingTalkSettings
 from app.auth.error import AuthUnavailable
 from app.model.personnel_refresh import DingTalkEmployee, DingTalkDepartment
+
+_dingtalk_request = ContextVar('dingtalk_request', default=False)
+
+
+class _DingTalkTransportLogFilter(logging.Filter):
+    def filter(self, record):
+        # httpcore DEBUG 可能带代理响应、认证头或异常原文；仅抑制本请求上下文的底层日志。
+        return not _dingtalk_request.get()
+
+
+for _logger_name in ('httpcore.connection', 'httpcore.http11', 'httpcore.http2',
+                     'httpcore.proxy', 'httpcore.socks'):
+    logging.getLogger(_logger_name).addFilter(_DingTalkTransportLogFilter())
 
 
 class _DingTalkLogFilter(logging.Filter):
@@ -37,9 +51,14 @@ class DingTalkEmployeeNotFound(RuntimeError):
 class DingTalkClient:
     def __init__(self,settings: DingTalkSettings,*,transport: httpx.AsyncBaseTransport | None=None):
         if not settings.configured:raise ValueError('钉钉应用凭据尚未配置')
+        proxy = settings.proxy_url.get_secret_value() or None
+        if proxy is not None and transport is not None:
+            raise ValueError('钉钉代理与测试 transport 不能同时指定')
         self._settings=settings
+        # token 与通讯录共用显式代理；忽略系统代理及 NO_PROXY，失败只报错，不回退直连。
+        # 保持目标与 HTTPS 代理的 TLS 证书校验；代理认证不进入业务请求参数或日志。
         self._http=httpx.AsyncClient(timeout=settings.timeout_seconds,trust_env=False,
-                                    follow_redirects=False,transport=transport)
+                                    follow_redirects=False,verify=True,proxy=proxy,transport=transport)
         self._token: SecretStr | None=None
         self._expires_at=0.0
         self._lock=asyncio.Lock()
@@ -48,11 +67,18 @@ class DingTalkClient:
         self._token=None
         await self._http.aclose()
 
+    async def _post(self, url: str, **kwargs) -> httpx.Response:
+        marker = _dingtalk_request.set(True)
+        try:
+            return await self._http.post(url, **kwargs)
+        finally:
+            _dingtalk_request.reset(marker)
+
     async def _application_token(self) -> str:
         async with self._lock:
             if self._token is None or monotonic() >= self._expires_at:
                 try:
-                    response=await self._http.post('https://api.dingtalk.com/v1.0/oauth2/accessToken',json={
+                    response=await self._post('https://api.dingtalk.com/v1.0/oauth2/accessToken',json={
                         'appKey':self._settings.app_key.get_secret_value(),
                         'appSecret':self._settings.app_secret.get_secret_value()})
                     response.raise_for_status()
@@ -68,7 +94,7 @@ class DingTalkClient:
         for attempt in range(2):
             token=await self._application_token()
             try:
-                response=await self._http.post('https://oapi.dingtalk.com'+path,
+                response=await self._post('https://oapi.dingtalk.com'+path,
                     params={'access_token':token},json=body)
                 response.raise_for_status()
                 payload=response.json()

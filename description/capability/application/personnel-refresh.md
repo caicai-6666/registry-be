@@ -47,6 +47,7 @@
 | --- | --- | --- |
 | `DINGTALK_APP_KEY` | 空 | 企业内部应用 AppKey，仅服务端使用。 |
 | `DINGTALK_APP_SECRET` | 空 | 对应 AppSecret，不从前端传入。 |
+| `DINGTALK_PROXY_URL` | 空 | 仅钉钉 HTTP 请求使用的 HTTP/HTTPS 代理根地址；可带代理认证，空值直连。详见下节。 |
 | `DINGTALK_TIMEOUT_SECONDS` | `10` | 单次钉钉 HTTP 超时秒数。 |
 | `DINGTALK_REFRESH_TIMEOUT_SECONDS` | `300` | 单次刷新总超时，覆盖资料读取、数据库和资料及状态同步。 |
 | `DINGTALK_REFRESH_MAX_CONCURRENCY` | `5` | 同时处理员工数，范围1—20；部门查询跨员工复用缓存。 |
@@ -57,10 +58,60 @@ MySQL 账号需要 employees 与 departments 的 SELECT，employees 的 name/dep
 
 ---
 
+## 钉钉固定出口代理
+
+`DingTalkSettings.proxy_url` 通过 `DINGTALK_PROXY_URL` 配置，使用 `SecretStr` 保存，模型打印和配置校验错误不回显输入。地址必须使用 `http://` 或 `https://`，允许根路径 `/`、端口及代理用户名密码，不接受业务路径、查询参数、片段、空白或 SOCKS 协议。未填写保持直连；进程环境优先于 `.env`，显式空环境变量可覆盖文件配置，读取不展开 `$`。
+
+`DingTalkClient` 以 `httpx.AsyncClient(proxy=..., trust_env=False, verify=True)` 创建唯一连接池。忽略系统 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 和 `NO_PROXY`；保留目标 HTTPS 与 HTTPS 代理证书校验，不跟随重定向。代理无法连接、拒绝 CONNECT 或要求认证时返回既有脱敏依赖错误，不自动回退直连。注入测试 `transport` 与非空代理互斥，防止测试误以为已经覆盖代理链路。
+
+| 请求范围 | 是否使用此代理 |
+| --- | --- |
+| 应用 token：`api.dingtalk.com/v1.0/oauth2/accessToken` | 是，包含 token 失效后重新获取。 |
+| 员工详情：`oapi.dingtalk.com/topapi/v2/user/get` | 是。 |
+| 部门详情：`oapi.dingtalk.com/topapi/v2/department/get` | 是。 |
+| 钉钉用户登录、机器人 HTTP、Stream/WebSocket | 本项目未实现；知识后端的同类能力由其自行配置，本变量不跨项目生效。 |
+| 头像代理、入库附件下载、中间件及模型请求 | 否，使用各自客户端；本项目没有钉钉文件下载调用。 |
+
+底层 `httpcore` DEBUG 日志可能包含代理响应、认证头或异常原文，钉钉请求期间通过 `ContextVar` 和日志过滤器抑制这些记录，不影响并行的其他业务请求；`httpx` 的通讯录 URL 日志继续将 `access_token` 脱敏。应用错误不记录代理 URL、凭据或 token。
+
+本机经已有 SSH 隧道使用固定出口时，在启动进程环境设置（端口以实际隧道为准）：
+
+```bash
+DINGTALK_PROXY_URL=http://127.0.0.1:18888 python app/main.py
+```
+
+代理需允许 `api.dingtalk.com:443` 和 `oapi.dingtalk.com:443` 的 CONNECT。配置变化后重启客户端所在进程；容器内的 `127.0.0.1` 指容器自身，不能直接复用宿主机回环隧道地址。本功能不建立隧道、不配置服务器或共享部署网络。
+
+以下只读验证直接使用项目封装和本地应用凭据，不启动应用生命周期、数据库刷新、Stream 或机器人；只输出成功标记，不输出 token 或部门资料：
+
+```bash
+DINGTALK_PROXY_URL=http://127.0.0.1:18888 python -B - <<'PY'
+import asyncio
+from app.config.dingtalk import load_dingtalk_settings
+from app.infrastructure.dingtalk import DingTalkClient
+from app.auth.error import AuthUnavailable
+
+async def main():
+    client = DingTalkClient(load_dingtalk_settings())
+    try:
+        await client.get_department(1)  # 首次查询先获取应用 token，两次请求均使用代理。
+        print('token and department read: success')
+    except AuthUnavailable:
+        print('readonly probe: failed (AuthUnavailable)')
+        raise SystemExit(1)
+    finally:
+        await client.close()
+
+asyncio.run(main())
+PY
+```
+
+---
+
 ## 实现、依赖与验证
 
 - `app/config/dingtalk.py`：独立通讯录配置，不恢复旧登录配置。
-- `app/infrastructure/dingtalk.py`：缓存应用 access_token，调用员工和部门只读接口，失效后最多刷新一次，不跟随重定向或使用环境代理。
+- `app/infrastructure/dingtalk.py`：缓存应用 access_token，调用员工和部门只读接口，失效后最多刷新一次，统一使用显式代理配置，不跟随重定向或使用系统代理。
 - `app/service/personnel_refresh.py`：预读取校验、并发限制、事务阶段、增量发送及错误状态。
 - `app/repository/employee.py`：单表目标读取与原子资料更新；`app/repository/personnel_sync.py`：SQLite 标记与修订确认。
 - `app/main.py`：共用人员仓库、SQLite和平台会话，关闭钉钉HTTP客户端；启动不执行刷新。
@@ -68,6 +119,8 @@ MySQL 账号需要 employees 与 departments 的 SELECT，employees 的 name/dep
 任职资料字段、初始化与迁移要求见[员工表契约](../../architecture/data/employee.md#任职资料与初始化)。每次显式刷新都会登记全部目标的资料与状态同步，主管和职位本身不发往中央。
 
 本地 `tests/test_personnel_departed.py` 使用内存 HTTP/仓库替身验证部分或全部员工不存在时的状态提交与同步、空员工列表、token 重试，以及权限/网络/格式错误仍中止；不连接真实钉钉，也不写入应用数据目录。
+
+代理回归命令为 `python -B -m unittest discover -s tests -p 'test_dingtalk_proxy.py' -v`。测试使用内存响应及本机临时 CONNECT 代理，覆盖两类钉钉域名、代理认证、407/502/连接失败不回退、TLS 校验、环境变量隔离及日志脱敏；配置样本仅写入 `tests/tmp/` 并自动清理。测试本身不访问真实钉钉，不读取实际凭据。
 
 本地 `tests/test_employment_status.py` 补充恢复在职、离职同步失败持久重试、确认响应缺失或状态不一致、数据库状态并发冲突/回滚、用户列表 HTTP/OpenAPI 和新旧中央登录响应验证。所有验证使用内存替身，不运行应用生命周期或共享服务。
 

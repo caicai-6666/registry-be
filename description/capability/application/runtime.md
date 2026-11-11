@@ -79,6 +79,8 @@ MySQL 连接参数用于正式资源查询、入库与删除接收中的资源�
 
 DINGTALK_APP_KEY、DINGTALK_APP_SECRET 是本项目手动刷新通讯录使用的应用凭据，不用于登录。DINGTALK_TIMEOUT_SECONDS、DINGTALK_REFRESH_TIMEOUT_SECONDS、DINGTALK_REFRESH_MAX_CONCURRENCY 分别控制单次请求、整轮超时和员工并发；均为空凭据时其他业务正常，刷新接口返回配置错误。配置、MySQL写权限及失败恢复见[已有员工资料刷新](personnel-refresh.md)。
 
+`DINGTALK_PROXY_URL` 可选配置钉钉 HTTP/HTTPS 代理，空值直连，配置后失败不回退；忽略系统代理并保持 TLS 校验。token、员工及部门请求共用此配置，不影响头像、附件、中间件或模型客户端，详见[钉钉固定出口代理](personnel-refresh.md#钉钉固定出口代理)。
+
 ---
 
 ## 业务路由入口
