@@ -16,7 +16,9 @@ class IngestionReviewDecision(BaseModel):
     file_level: FileLevel | None = Field(default=None, description="批准入库时必填的文件等级，严格的有符号 64 位整数；拒绝时不设置。")
     note: str = Field(default="", strict=True, max_length=10000, description="审核人意见，支持 Markdown；拒绝时必须提供非空理由。")
     passport: Passports | None = Field(default=None,
-        description="通过时可选的通行证数组，每项最多 512 字符且非空白；未提供则生成单元素数组。拒绝时只能省略或传空数组。")
+        description="通过时可选的通行证数组，每项最多 512 字符且非空白；未提供则按兼容规则生成单元素数组。开启 generate_new_passport 时可传空数组。拒绝时只能省略、null 或空数组。")
+    generate_new_passport: bool = Field(default=False, strict=True,
+        description="批准时是否额外生成一个新的后端通行证并追加到 passport；未选择已有通行证时只生成一个。拒绝时必须为 false。")
 
     @model_validator(mode="after")
     def validate_decision(self):
@@ -25,7 +27,10 @@ class IngestionReviewDecision(BaseModel):
         if not self.approved and self.file_level is not None:
             raise ValueError("拒绝入库不能设置文件等级")
         if self.approved and self.passport is not None and not self.passport:
-            raise ValueError("同意入库时通行证数组不能为空")
+            if not self.generate_new_passport:
+                raise ValueError("同意入库时通行证数组不能为空；如需只生成新通行证，请开启 generate_new_passport")
+        if not self.approved and self.generate_new_passport:
+            raise ValueError("拒绝入库不能生成通行证")
         if not self.approved:
             if not self.note.strip():
                 raise ValueError("拒绝入库必须填写审核理由")

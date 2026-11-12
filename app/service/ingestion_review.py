@@ -97,7 +97,18 @@ class IngestionReviewService:
         async with self._lock(review_id):
             row = await self._review(review_id)
             decision = "approved" if body.approved else "rejected"
-            passport = (body.passport if body.passport is not None else row["passport"] or [uuid4().hex]) if body.approved else []
+            if not body.approved:
+                passport = []
+            elif row["decision"] is not None:
+                # 决定已冻结时复用数据库中的最终数组，保证带生成信号的重复请求幂等。
+                passport = row["passport"]
+            else:
+                passport = list(body.passport) if body.passport is not None else list(row["passport"] or [])
+                if body.generate_new_passport:
+                    passport.append(uuid4().hex)
+                elif body.passport is None and not passport:
+                    # 兼容旧调用：批准但未提供 passport 仍自动生成一个新通行证。
+                    passport.append(uuid4().hex)
             if row["decision"] is None:
                 if row["status"] != "pending":
                     raise ReviewConflict("该申请已经完成审核")

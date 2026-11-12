@@ -282,6 +282,7 @@ curl --request POST 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/
 | body | `file_level` | integer 或 null | 批准时必填 | 严格的有符号 64 位整数；拒绝时省略或 null。不接受 bool、字符串或小数，等级含义尚未定义。 |
 | body | `note` | string | 否 | 默认 `""`，最多 10000 字符，支持 Markdown；拒绝时必须非空且非纯空白。 |
 | body | `passport` | string[] 或 null | 否 | 通过时可选择多个已有或自定义通行证，数组非空，每项非空白且最多 512 字符；省略或 null 时生成 UUID 单元素数组。拒绝时只能省略、null 或 `[]`。 |
+| body | `generate_new_passport` | boolean | 否 | 默认 `false`。批准时为 `true` 会由后端生成一个新的 UUID 通行证并追加到 `passport`；`passport` 为空数组时只生成新通行证。拒绝时必须为 `false`。 |
 
 无 query 参数。推荐列表提供选择建议，不限制审核员只能选择推荐条目。通行证允许被多个资源共用，一份文件也可持有多个通行证；新人工提交不再接受单字符串。
 
@@ -330,7 +331,7 @@ curl --request POST 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/
 curl --request POST 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/ingestion-review/12/decision' \
   -H 'Authorization: Bearer 替换为当前模式的token' \
   -H 'Content-Type: application/json' \
-  --data '{"approved":true,"file_level":2,"passport":["existing-passport","another-passport"],"note":"同意入库"}'
+  --data '{"approved":true,"file_level":2,"passport":["existing-passport"],"generate_new_passport":true,"note":"同意入库并新建通行证"}'
 ```
 
 拒绝入库：
@@ -346,7 +347,7 @@ curl --request POST 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/
 
 通过后将原件从入库暂存目录移至正式资源目录，复制 SQLite 中的文件元信息、摘要向量、申请人和备注、申请时间及本次审核人、意见、通行证和文件等级至 MySQL，回填 `resource_id` 并发布反馈。拒绝只更新 SQLite 并反馈空通行证，不写入 MySQL，原件保留在暂存目录，暂不清理。
 
-初次提交要求有效的中间件平台会话。决定保存后不得更改；同一审核人按相同决定、意见、通行证和文件等级重试会恢复处理或返回原结果，省略通行证时复用首次生成的值。其他审核人不能覆盖或接管该决定。已完成的重复提交不再次创建资源、迁移文件或发布反馈。
+初次提交要求有效的中间件平台会话。决定保存后不得更改；同一审核人按相同决定、意见、通行证、生成信号和文件等级重试会恢复处理或返回原结果。`generate_new_passport=true` 只在首次预留决定时生成一次；重复请求复用数据库中已冻结的最终数组，不重复追加。省略通行证且生成信号为 false 时，继续兼容生成一个新通行证。其他审核人不能覆盖或接管该决定。已完成的重复提交不再次创建资源、迁移文件或发布反馈。
 
 `503` 可能发生在决定已经保存或文件正式入库之后，不代表全部回滚。后台会恢复未完成阶段；调用方也可用原请求重试，不能更改决定。正式身份冲突在文件晋升前检出且 MySQL 未提交时，释放批准预留并返回待审，可继续拒绝该申请。
 

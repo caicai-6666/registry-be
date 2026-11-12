@@ -13,7 +13,7 @@
 当前上游消息 `reviewer` 表示来源平台发起入库的人，注册中心统一映射为 `applicant`；对外不再返回重复的 `source_reviewer`。注册中心最终 `reviewer` 仅在实际审核后确定。旧待审记录首次确定决定时补齐已知申请人，再复制到正式资源；身份兼容规则见[审核表契约](../../architecture/data/review.md#入库审核表)。
 
 1. 读取 SQLite 申请，确认待审状态；通过时先确认暂存原件有效。
-2. SQLite 写事务预留 `decision`、实际审核人、意见、审核时间和最终 `passport`。未指定通行证时生成 UUID 十六进制字符串的单元素数组，并只生成一次；指定时保存完整数组，拒绝保存空数组，见[通行证数组契约](../../architecture/data/passport.md)。
+2. SQLite 写事务预留 `decision`、实际审核人、意见、审核时间和最终 `passport`。批准请求可通过 `generate_new_passport=true` 要求后端追加一个 UUID；未选择已有通行证时只保存这个新 UUID。未指定通行证且信号为 false 时继续兼容生成单元素数组，并只生成一次；指定数组时保存完整数组，拒绝保存空数组，见[通行证数组契约](../../architecture/data/passport.md)。
 3. 通过：在 MySQL 事务中锁定平台文件名与源 ID，创建或校验完整快照一致的正式记录；执行 `promote_ingestion` 并校验正式原件后提交事务。
 4. 拒绝：不调用 MySQL 写入或文件迁移，原件仍保留在 ingestion 暂存目录。
 5. SQLite 更新 `status`，通过时关联正式 `resource_id`，拒绝时保持 NULL。
