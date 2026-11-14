@@ -22,7 +22,7 @@
 
 后端已提供正式资源表与只读检索连接池，待审核申请持久化由 SQLite 承担，字段约束见[注册中心资源表契约](../../architecture/data/resource.md)。建表 SQL 由 `knowledge-accumulation-deploy/mysql/init/` 维护并打包进 MySQL 镜像，在空数据目录首次启动时执行。资源仓库只初始化连接池，不执行建表；已有数据卷不会重跑脚本，当前仅保留最终版本初始化定义，不再提供历史 MySQL 迁移文件；旧结构处理边界见[资源表说明](../../architecture/data/resource.md#初始化与版本边界)。
 
-新空卷的 `003-personnel.sql` 已包含任职资料、多部门及检查约束；旧卷按[员工初始化边界](../../architecture/data/employee.md#初始化与接入边界)检查后显式迁移，不重复补列。
+新空卷的 `001-schema.sql` 已包含任职资料、多部门及检查约束；旧卷按[员工初始化边界](../../architecture/data/employee.md#初始化与接入边界)检查后显式迁移，不重复补列。
 
 后端已提供[服务入口与容器配置](../application/runtime.md)，并接入 Compose，等待 MySQL 健康检查通过后启动。消息中间件部署仍由对应项目维护。
 

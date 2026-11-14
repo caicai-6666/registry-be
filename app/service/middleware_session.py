@@ -27,6 +27,7 @@ class MiddlewareSessionService:
         self._task: asyncio.Task | None = None
         self._token: SecretStr | None = None
         self._expires_at = 0.0
+        self._heartbeat_interval = 5.0
         self._closed = False
 
     async def start(self) -> None:
@@ -63,6 +64,7 @@ class MiddlewareSessionService:
                     logger.info("中间件平台注册登录成功")
                 # 从请求开始保守估算有效期，不能将网络耗时当成额外续期。
                 self._expires_at = started + result.expires_in_seconds
+                self._heartbeat_interval = result.heartbeat_interval_seconds
                 delay = min(result.heartbeat_interval_seconds, max(0, self._expires_at - self._clock()))
             except asyncio.CancelledError:
                 raise
@@ -78,7 +80,11 @@ class MiddlewareSessionService:
                 )
                 delay = settings.retry_interval_seconds
                 if self._token is not None:
-                    delay = min(delay, max(0, self._expires_at - self._clock()))
+                    remaining = max(0, self._expires_at - self._clock())
+                    # 心跳失败不能直接睡到过期：按服务端间隔且最多 5 秒重试，
+                    # 临近过期时预留再次续期机会；最后不足 1 秒时等到期，避免忙循环。
+                    delay = min(delay, self._heartbeat_interval, 5.0,
+                                max(1.0, remaining / 2), remaining)
             await self._sleep(delay)
 
     def get_access_token(self) -> SecretStr | None:

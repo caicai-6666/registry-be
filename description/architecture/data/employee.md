@@ -46,7 +46,7 @@
 
 首次员工初始化由知识后端的 `EmployeeOnboardingService` 从钉钉详情采集并与员工、部门在同一事务写入；已有员工再次登录不补采。本项目通过[手动刷新](../../capability/application/personnel-refresh.md)更新已有员工，钉钉未维护或返回空值时写入 null，可清除旧主管/职位，不保留过期任职资料。
 
-已有共享人员库缺少 `work_profile` 时，上线前需手工执行知识后端的[015 任职资料迁移](../../../../knowledge-accumulation-be/schema/015-employee-work-profile.sql)，为历史员工初始化两个 null。当前部署项目 `003-personnel.sql` 已为新空卷包含此字段和约束，新库不重复执行 `015`；已有卷不会重跑初始化，应用也不执行 DDL；缺列或字段非法时刷新失败，不静默跳过。数据库账号需具备 work_profile 的 SELECT/UPDATE 权限；初始化脚本不触发真实库迁移或批量刷新。
+已有共享人员库缺少 `work_profile` 时，上线前需手工执行知识后端的[015 任职资料迁移](../../../../knowledge-accumulation-be/schema/015-employee-work-profile.sql)，为历史员工初始化两个 null。当前部署项目 `001-schema.sql` 已为新空卷包含此字段和约束，新库不重复执行 `015`；已有卷不会重跑初始化，应用也不执行 DDL；缺列或字段非法时刷新失败，不静默跳过。数据库账号需具备 work_profile 的 SELECT/UPDATE 权限；初始化脚本不触发真实库迁移或批量刷新。
 
 ---
 
@@ -104,11 +104,11 @@ ORDER BY e.userid;
 
 ## 初始化与接入边界
 
-基础建表定义位于 [003-personnel.sql](../../../../knowledge-accumulation-deploy/mysql/init/003-personnel.sql)，由 MySQL 容器在空数据卷首次初始化时执行，先建部门表，再建员工表。已有开发库需单独执行该脚本；重建镜像不会使已有数据卷重跑初始化，禁止通过清空卷补建表。
+基础建表定义位于 [001-schema.sql](../../../../knowledge-accumulation-deploy/mysql/init/001-schema.sql)，由 MySQL 容器在空数据卷首次初始化时执行，先建部门表，再建员工表。已有开发库按实际结构执行增量迁移，不运行空库初始化脚本；重建镜像不会使已有数据卷重跑初始化，禁止通过清空卷补建表。
 
-脚本使用 `CREATE TABLE IF NOT EXISTS`，可重复补建缺失表，但不会升级已经存在的同名表。部署前应检查实际表结构，不能将某个开发环境已完成的补列视为所有环境已就绪。首次登录事务会保存顶级部门及员工，姓名和头像地址允许 null 以兼容旧记录，已有员工再次登录不自动补写或覆盖资料。
+该脚本仅用于空库初始化，不作为已有库升级脚本。部署前应检查实际表结构，不能将某个开发环境已完成的补列视为所有环境已就绪。首次登录事务会保存顶级部门及员工，姓名和头像地址允许 null 以兼容旧记录，已有员工再次登录不自动补写或覆盖资料。
 
-子平台管理员表由 [004-platform-admins.sql](../../../../knowledge-accumulation-deploy/mysql/init/004-platform-admins.sql) 创建，必须在员工表之后执行。新部署按初始化文件名顺序建表，已有卷的补建方式见 [MySQL 镜像说明](../../../../knowledge-accumulation-deploy/mysql/readme.md#初始化与数据边界)。
+子平台管理员表由 [001-schema.sql](../../../../knowledge-accumulation-deploy/mysql/init/001-schema.sql) 创建，必须在员工表之后执行。新部署按初始化文件名顺序建表，已有卷的补建方式见 [MySQL 镜像说明](../../../../knowledge-accumulation-deploy/mysql/readme.md#初始化与数据边界)。
 
 钉钉登录、首次员工初始化与用户 token 签发由知识后端负责，registry 认证只查询中间件中央 token、用户名及管理员名单，不读取本地员工资料，不根据本地开发配置建立身份。登录与审核身份见[登录身份契约](authenticated-user.md)，已有审核记录中的姓名不会自动转换为钉钉 `userid`。运行与部署依赖见 [MySQL 基础设施](../../capability/infrastructure/mysql.md)。
 

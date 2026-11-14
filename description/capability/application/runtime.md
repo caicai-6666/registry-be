@@ -169,12 +169,12 @@ docker logs -f registry-be-dev
 | 检查项 | 发布要求 |
 | --- | --- |
 | 共享人员库 | `employees.employment_status` 为非空 `VARCHAR(16)`，默认 `employed`，约束只允许 `employed`／`resigned`。字段缺失会使人员列表和刷新失败。 |
-| 新空卷初始化 | 2026-11-09 核对时，统一部署 `mysql/init/003-personnel.sql` 尚未包含该列；部署项目需同步定义，或在初始化后、启动业务前完成同一迁移。 |
+| 新空卷初始化 | 当前统一部署 `mysql/init/001-schema.sql` 已包含员工在职状态、多部门、任职资料及约束。仅用于空卷初始化，不可用于升级已有库。 |
 | 已有数据卷 | 核对实际表定义；缺列时由数据库维护者执行知识后端 [022 迁移](../../../../knowledge-accumulation-be/schema/022-employee-employment-status.sql)。已迁移不重复执行，不清空卷；重建镜像不会升级旧表。 |
 | 中间件 | 用户资料更新接受并返回 `employment_status`。registry 写入状态时要求回执一致；不支持会保留待同步项并报错。 |
 | 前端 | 用户列表按 `employment_status` 区分在职／离职；手动推荐调用 `POST /ingestion-review/{review_id}/recommendations`，成功后替换建议列表。 |
 | 请求等待 | 当前推荐为同步 HTTP；核对浏览器、前端 Nginx 和外层网关的超时。现有 registry-fe 模板为 `proxy_read_timeout 660s`，宿主机配置需独立同步，重建后端镜像不会更新网关。660 秒也不保证覆盖所有候选批次的最坏耗时。 |
-| 运行配置 | 模型、embedding、推荐和 PDF 配置有效时装配手动推荐，关闭自动消费也可调用；头像缓存继续读取 `KNOWLEDGE_ACCUMULATION_AVATAR_CACHE_SECONDS`，默认 86400 秒，无需在部署 `.env` 重复配置。 |
+| 运行配置 | 模型、embedding、推荐和 PDF 配置有效时装配手动推荐，关闭自动消费也可调用；头像缓存继续读取 `KNOWLEDGE_ACCUMULATION_AVATAR_CACHE_SECONDS`，默认 86400 秒，部署使用 `REGISTRY_KNOWLEDGE_ACCUMULATION_AVATAR_CACHE_SECONDS` 显式注入。 |
 
 在目标数据库执行只读结构检查：
 
@@ -192,11 +192,13 @@ SHOW CREATE TABLE employees;
 
 ## 与统一部署的关系
 
-后端已加入 `knowledge-accumulation-deploy` 的 Compose `backend` 服务，构建上下文为 `../registry-be`，数据库连接固定为 `mysql:3306`，等待 MySQL 健康检查通过后启动。运行配置由部署 `REGISTRY_BACKEND_ENV_FILE` 指定（默认 `../registry-be/.env`，相对部署目录），按 raw 模式注入，并由部署环境覆盖数据库、容器目录及空的 `APP_PATH_PREFIX`，确保容器生产路径不带 `/dev`。
+后端由 `knowledge-accumulation-deploy` 的 Compose `backend` 服务管理，生产源码位于 deploy 下的 `registry-be/`，构建上下文为 `./registry-be`。数据库连接固定为 `mysql:3306`，等待 MySQL 健康检查通过后启动。
 
-Compose 使用 `backend-data:/workspace/data` 持久化运行数据，认证配置从 `REGISTRY_BACKEND_ENV_FILE` 指定的文件原样注入，无需人员文件。完整准备与启动步骤见[统一部署说明](../../../../knowledge-accumulation-deploy/readme.md#管理员认证与人员数据)。该方式与上面的手工 `docker run` 示例分别使用独立数据卷，不会自动互相迁移数据。
+运行配置统一来自 deploy 根目录 `.env`，由 Compose `environment` 显式映射；registry 专属项通常加 `REGISTRY_` 前缀，共享数据库、中间件地址和知识后端地址按部署模板填写。不再读取 `REGISTRY_BACKEND_ENV_FILE` 或子项目 `.env`，本项目 `.env` 仅用于 IDE 独立运行。生产 `APP_PATH_PREFIX` 固定为空。
 
-Compose 还覆盖 `KNOWLEDGE_ACCUMULATION_BASE_URL`，默认通过同一网络的 `http://knowledge-backend:8000` 访问知识后端；可在部署 `.env` 改为实际可达的地址。头像超时、大小和缓存时长，以及钉钉通讯录刷新配置，继续从 `REGISTRY_BACKEND_ENV_FILE` 读取。
+Compose 使用 `backend-data:/workspace/data` 持久化运行数据。头像缓存、钉钉代理等均须在 deploy 配置中填写对应变量；容器访问宿主机代理不能使用 `127.0.0.1`，应使用容器可达地址及实际端口（本机代理为 22888）。完整步骤见[统一部署说明](../../../../knowledge-accumulation-deploy/readme.md)。手工 `docker run` 示例与 Compose 使用独立数据卷，不自动迁移。
+
+本次心跳恢复优化与额外生成通行证不新增依赖、环境变量或数据库迁移，无需修改 Dockerfile 或 Compose；需更新部署源码并重建 backend 镜像。`REGISTRY_MIDDLEWARE_RETRY_INTERVAL_SECONDS=30` 可以保留，心跳失败已由代码限制短间隔重试。保持单实例、单 worker，前端按[审核接口](../../api/ingestion-review.md)传递 `generate_new_passport`。
 
 Compose 同时提供 `registry-frontend` 服务（默认宿主机端口 `23080`），容器内 Nginx 直接向 `backend:8000` 转发完整生产 API 路径。前端与知识入口需要外层网关提供同源访问，详见[统一部署说明](../../../../knowledge-accumulation-deploy/readme.md#注册中心前端)。
 

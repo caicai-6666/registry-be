@@ -183,7 +183,7 @@ docker compose up -d --build --wait backend registry-frontend
 docker compose ps
 ```
 
-部署 `.env` 中的 `REGISTRY_BACKEND_ENV_FILE` 默认指向 `../registry-be/.env`，按 raw 模式注入。Compose 覆盖数据库连接、持久化目录和空的 `APP_PATH_PREFIX`；头像代理默认直接访问 `http://knowledge-backend:8000`。知识后端与统一入口的准备、迁移和启动按部署文档独立完成，不能用 HTTP 健康状态代替业务表与依赖检查。
+部署统一使用 deploy 根目录 `.env`，通过 Compose `environment` 显式注入；registry 专属项通常使用 `REGISTRY_` 前缀，共享地址和数据库项按部署模板填写，不再读取本项目 `.env`。生产源码放在 deploy 下的 `registry-be/`，Compose 构建上下文为 `./registry-be`；`APP_PATH_PREFIX` 固定为空。知识后端与统一入口的准备、迁移和启动按部署文档完成，不能用 HTTP 健康状态代替业务表与依赖检查。
 
 | registry 入口 | 默认地址 |
 | --- | --- |
