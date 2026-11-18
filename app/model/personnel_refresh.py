@@ -9,6 +9,7 @@ from app.model.employee import EmployeeWorkProfile, EmploymentStatus
 class EmployeeRefreshTarget(BaseModel):
     model_config=ConfigDict(frozen=True,extra='forbid')
     userid: str = Field(strict=True,min_length=1,max_length=128)
+    avatar_url: str | None = Field(default=None, description='现有头像存储引用；为空时可补齐，已有引用不覆盖。')
     employment_status: EmploymentStatus = Field(description='刷新前持久化的在职状态，用于检测并发修改；不得用默认值掩盖缺列。')
     name: str | None = Field(default=None,strict=True,min_length=1,max_length=200)
     department_id: int = Field(strict=True,ge=0)
@@ -17,6 +18,14 @@ class EmployeeRefreshTarget(BaseModel):
 
 
 class DingTalkEmployee(BaseModel):
+    avatar: str | None = Field(default=None, repr=False, description="钉钉头像来源地址，仅传给知识后端校验下载。")
+
+    @field_validator("avatar", mode="before")
+    @classmethod
+    def optional_avatar(cls, value):
+        # 头像异常不能阻塞其他人员资料刷新，非法或空值视为无可用头像。
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
     userid: str = Field(strict=True,min_length=1,max_length=128)
     name: str = Field(strict=True,min_length=1,max_length=200)
     dept_id_list: list[Annotated[int,Field(strict=True,gt=0)]] = Field(min_length=1)
@@ -53,6 +62,7 @@ class DingTalkDepartment(BaseModel):
 
 
 class EmployeeRefreshChange(BaseModel):
+    avatar_source_url: str | None = Field(default=None, repr=False, description="本轮钉钉头像来源，供缺失头像补齐使用，不直接写员工表。")
     model_config=ConfigDict(frozen=True,extra='forbid')
     before: EmployeeRefreshTarget
     name: str = Field(strict=True,min_length=1,max_length=200)
@@ -62,6 +72,8 @@ class EmployeeRefreshChange(BaseModel):
 
 
 class PersonnelRefreshResult(BaseModel):
+    created_avatars: int = Field(default=0, ge=0, description="本轮知识后端确认新增的头像数。")
+    failed_avatars: int = Field(default=0, ge=0, description="本轮头像补齐失败或未配置依赖的员工数，下次人工刷新重试。")
     skipped_users: int = Field(default=0,ge=0,description='本次钉钉明确返回不存在、跳过资料采集并标记离职的员工数；保留原资料及权限。')
     refreshed_users: int = Field(ge=0,description='本次成功读取并完成数据库更新阶段的已有员工数。')
     refreshed_departments: int = Field(ge=0,description='本次刷新名称的所属顶级部门数。')

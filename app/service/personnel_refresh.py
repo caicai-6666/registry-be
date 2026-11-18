@@ -7,6 +7,7 @@ import httpx
 from app.config.dingtalk import DingTalkSettings
 from app.infrastructure.dingtalk import DingTalkClient, DingTalkEmployeeNotFound
 from app.infrastructure.middleware import MiddlewareClient
+from app.infrastructure.knowledge import KnowledgeClient
 from app.model.department import DepartmentInfo
 from app.model.employee import EmployeeWorkProfile
 from app.model.middleware_user import MiddlewareUserPatch
@@ -22,9 +23,11 @@ logger=logging.getLogger(__name__)
 class PersonnelRefreshService:
     def __init__(self,settings: DingTalkSettings,employees: MySQLEmployeeRepository,
                  dingtalk: DingTalkClient | None,pending: SQLitePersonnelSyncRepository,
-                 sessions: MiddlewareSessionService,middleware: MiddlewareClient | None):
+                 sessions: MiddlewareSessionService,middleware: MiddlewareClient | None,
+                 knowledge: KnowledgeClient | None = None):
         self._settings,self._employees,self._dingtalk=settings,employees,dingtalk
         self._pending,self._sessions,self._middleware=pending,sessions,middleware
+        self._knowledge=knowledge
         self._lock=asyncio.Lock()
 
     async def _prepare(self):
@@ -72,7 +75,7 @@ class PersonnelRefreshService:
                 top=await top_department(employee.dept_id_list)
                 # 汇报关系使用员工详情的主管 userid，与部门负责人独立；空白资料归一为空。
                 work_profile=EmployeeWorkProfile(manager_userid=employee.manager_userid,title=employee.title)
-                return EmployeeRefreshChange(before=target,name=employee.name,department_id=top[0].dept_id,
+                return EmployeeRefreshChange(before=target,name=employee.name,avatar_source_url=employee.avatar,department_id=top[0].dept_id,
                                              department_ids=[item.dept_id for item in top],
                                              work_profile=work_profile),top
 
@@ -121,7 +124,25 @@ class PersonnelRefreshService:
             synced+=1
         return synced
 
-    async def refresh(self) -> PersonnelRefreshResult:
+    async def _fill_avatars(self, changes, access_token: str | None) -> tuple[int, int]:
+        created = failed = 0
+        for change in changes:
+            if change.before.avatar_url or not change.avatar_source_url:
+                continue
+            # 头像是独立的可重试补齐操作，不回滚已更新资料，也不保存用户令牌。
+            if self._knowledge is None or not access_token:
+                failed += 1
+                continue
+            try:
+                status = await self._knowledge.fill_employee_avatar(
+                    change.before.userid, change.avatar_source_url, access_token)
+                created += status == 'created'
+            except Exception as error:
+                failed += 1
+                logger.warning('员工头像补齐失败：error_type=%s', type(error).__name__)
+        return created, failed
+
+    async def refresh(self, access_token: str | None = None) -> PersonnelRefreshResult:
         if self._dingtalk is None:
             raise PersonnelRefreshError('请先配置钉钉 AppKey 和 AppSecret',phase='configuration')
         if self._lock.locked():
@@ -144,7 +165,8 @@ class PersonnelRefreshService:
                 if pending:
                     raise PersonnelRefreshError('数据库已更新，部分资料或在职状态尚未同步；再次刷新会重试',
                         phase=phase,database_updated=True,pending_names=pending)
-                return PersonnelRefreshResult(refreshed_users=len(changes),refreshed_departments=len(departments),
+                created_avatars,failed_avatars=await self._fill_avatars(changes,access_token)
+                return PersonnelRefreshResult(created_avatars=created_avatars,failed_avatars=failed_avatars,refreshed_users=len(changes),refreshed_departments=len(departments),
                                               synced_names=synced,pending_names=0,skipped_users=len(resigned))
         except PersonnelRefreshError:raise
         except Exception as error:

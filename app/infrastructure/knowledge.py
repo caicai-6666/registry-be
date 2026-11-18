@@ -63,5 +63,28 @@ class KnowledgeClient:
             logger.warning('头像代理失败：error_type=%s', type(error).__name__)
             raise AvatarProxyError(503) from None
 
+    async def fill_employee_avatar(self, userid: str, avatar_url: str, access_token: str) -> str:
+        """转发已认证管理员的用户令牌，由知识后端再次鉴权并原子补齐头像。"""
+        async with asyncio.timeout(self._settings.timeout_seconds):
+            request = self._http.build_request('POST',
+                f'{APPLICATION_PREFIX}/api/internal/employee/avatar',
+                headers={'Authorization': f'Bearer {access_token}'},
+                json={'userid': userid, 'avatar_url': avatar_url})
+            request.headers.pop('cookie', None)
+            response = await self._http.send(request)
+            response.raise_for_status()
+            body = response.json()
+            if (response.status_code != 200 or not isinstance(body, dict)
+                    or body.get('userid') != userid
+                    or body.get('status') not in ('created', 'existing', 'skipped')):
+                raise ValueError('头像补齐回执不合法')
+            filename = body.get('avatar_url')
+            if body['status'] in ('created', 'existing'):
+                if not isinstance(filename, str) or re.fullmatch(r'[a-f0-9]{32}\.webp', filename) is None:
+                    raise ValueError('头像补齐文件名不合法')
+            elif filename is not None:
+                raise ValueError('跳过头像补齐的回执不合法')
+            return body['status']
+
     async def close(self) -> None:
         await self._http.aclose()

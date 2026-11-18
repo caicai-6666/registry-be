@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
+from app.router.dependency import _bearer_access_token
 from app.model.department import DepartmentInfo
 from app.model.employee import EmployeeInfo
 from app.repository.employee import MySQLEmployeeRepository
@@ -66,7 +67,7 @@ async def refresh_all_users(request: Request, response: Response) -> PersonnelRe
     if service is None:
         raise HTTPException(503, '员工刷新服务暂不可用', headers=headers)
     try:
-        result = await service.refresh()
+        result = await service.refresh(access_token=_bearer_access_token(request.headers.get("Authorization")))
     except PersonnelRefreshError as error:
         raise HTTPException(error.status_code, {
             'message': str(error), 'phase': error.phase, 'database_updated': error.database_updated,

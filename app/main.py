@@ -139,7 +139,8 @@ def create_app(
                 dingtalk = DingTalkClient(dingtalk_config)
                 resources.push_async_callback(dingtalk.close)
             application.state.personnel_refresh_service = PersonnelRefreshService(
-                dingtalk_config, employees, dingtalk, SQLitePersonnelSyncRepository(sqlite), service, client)
+                dingtalk_config, employees, dingtalk, SQLitePersonnelSyncRepository(sqlite), service, client,
+                knowledge=application.state.knowledge_client)
             ingestion = ingestion_settings or load_ingestion_settings()
             deletion = deletion_settings or load_deletion_settings()
             files = ReviewFileService(ingestion)

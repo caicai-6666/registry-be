@@ -1,6 +1,6 @@
 # 员工头像代理与存储边界
 
-> **职责：** 头像初始化、无损 WebP 转码和磁盘存储继续由 knowledge-accumulation-be 负责。registry 提供受管理员认证保护的 HTTP 读取代理，不恢复本地头像目录或存储服务。
+> **职责：** 头像初始化、无损 WebP 转码和磁盘存储继续由 knowledge-accumulation-be 负责。registry 提供受管理员认证保护的 HTTP 读取代理，并在人员刷新时请求知识后端补齐缺失头像，不恢复本地头像目录或存储服务。
 
 ---
 
@@ -49,3 +49,10 @@ registry 接口契约见[代理读取用户头像](../../api/resource.md#代理�
 `tests/test_avatar_proxy.py` 使用 HTTP 替身覆盖固定地址和端口、精确用户 Bearer、Cookie 隔离、重定向拒绝、媒体类型、空响应、响应上限、网络超时、状态码、路径、配置和关闭连接。`tests/test_resource_api.py` 验证未配置时 503 且无本地头像存储；`tests/test_management_dependencies.py` 将代理纳入统一管理员边界。
 
 测试不连接真实知识后端，不调用共享服务，不读取真实头像；测试临时目录均位于 tests/tmp 并清理。
+
+
+---
+
+## 缺失头像写入代理
+
+`KnowledgeClient.fill_employee_avatar` 使用本次管理员用户 Bearer 调用知识后端补齐接口，固定地址及开发前缀与读取代理一致，不发送 Cookie、不跟随重定向。该方法只传钉钉来源地址，不在注册中心下载或保存图片；知识后端再次鉴权并处理安全下载、转码、幂等写入及候选文件清理。流程、计数与失败边界见[人员刷新](../application/personnel-refresh.md#缺失头像补齐)。

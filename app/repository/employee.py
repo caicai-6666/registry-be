@@ -109,11 +109,11 @@ class MySQLEmployeeRepository:
                              platform_permissions=json.loads(row['platform_permissions'])) for row in rows]
 
     async def list_refresh_targets(self) -> list[EmployeeRefreshTarget]:
-        """读取姓名、部门和任职资料快照，不依赖头像或权限的解析。"""
+        """读取姓名、部门和任职资料快照，包含头像引用以判断是否需要补齐，不读取头像文件或权限。"""
         await self._initialize()
         async with asyncio.timeout(self._settings.operation_timeout_seconds):
             async with self._pool.acquire() as connection, connection.cursor(aiomysql.DictCursor) as cursor:
-                await cursor.execute('SELECT userid,name,employment_status,department_id,department_ids,work_profile FROM employees ORDER BY userid')
+                await cursor.execute('SELECT userid,name,avatar_url,employment_status,department_id,department_ids,work_profile FROM employees ORDER BY userid')
                 return [_refresh_target(row) for row in await cursor.fetchall()]
 
     async def refresh_profiles(self, changes: list[EmployeeRefreshChange], departments: list[DepartmentInfo],
@@ -125,7 +125,7 @@ class MySQLEmployeeRepository:
                 await connection.begin()
                 try:
                     async with connection.cursor(aiomysql.DictCursor) as cursor:
-                        await cursor.execute('SELECT userid,name,employment_status,department_id,department_ids,work_profile FROM employees ORDER BY userid FOR UPDATE')
+                        await cursor.execute('SELECT userid,name,avatar_url,employment_status,department_id,department_ids,work_profile FROM employees ORDER BY userid FOR UPDATE')
                         current = {row['userid']: _refresh_target(row) for row in await cursor.fetchall()}
                         # 外部资料读取期间员工若被编辑或删除，本次重试，避免覆盖更新后的资料。
                         targets=[change.before for change in changes]+resigned

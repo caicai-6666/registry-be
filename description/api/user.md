@@ -105,7 +105,7 @@ curl 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/user/department
 **成功响应：** `200 application/json`，`Cache-Control: no-store`：
 
 ```json
-{"refreshed_users":12,"skipped_users":1,"refreshed_departments":3,"synced_names":13,"pending_names":0}
+{"refreshed_users":12,"skipped_users":1,"refreshed_departments":3,"synced_names":13,"pending_names":0,"created_avatars":2,"failed_avatars":0}
 ```
 
 refreshed_users是本次成功刷新人数，不含跳过员工；skipped_users是钉钉明确返回不存在、跳过资料采集并成功标记离职的人数；refreshed_departments是不同顶级部门数，synced_names是本次确认资料或状态同步的员工数（含仅同步离职状态及历史失败项），不等于所有员工都发生了修改。`synced_names` 与 `pending_names` 保留旧字段名，均按资料及状态的员工同步项计数。无员工且无历史待同步项时返回各项为 0，不导入其他钉钉员工。
@@ -191,3 +191,6 @@ curl --request POST 'http://127.0.0.1:23000/knowledge-accumulation/registry/api/
 ```
 
 **行为与边界：** 先提交MySQL，再即时增量请求中间件user/update、platform/admins/add或remove。权限发送合并后的完整映射，管理员仅逐平台增删；不调用任何full-table或登录写入。重复提交可重试持久待同步项，已确认项不重复发送。保留姓名、头像、部门、未指定平台。允许修改当前用户自身管理权，撤销registry管理权后后续请求将403；部分失败需其他管理员处理。具体事务、重试与跨后端边界见[用户授权管理](../capability/application/user-access.md)。
+
+
+人员刷新成功响应新增 `created_avatars`（确认新增头像人数）、`failed_avatars`（补齐失败人数），均为非负整数，沿用全局整数序列化约定。已有头像不覆盖，无钉钉头像或离职员工跳过。单个头像失败仍返回成功的资料刷新结果，下次人工刷新重试；详情见[缺失头像补齐](../capability/application/personnel-refresh.md#缺失头像补齐)。
