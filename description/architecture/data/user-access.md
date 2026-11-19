@@ -22,7 +22,7 @@
 
 ## 本地写入边界
 
-MySQL仍使用现有employees与platform_admins，不增表或改DDL。事务锁定员工并核对内部读取的权限快照；仅写权限JSON和指定平台的管理员关联。JSON生成与SQL参数绑定在服务端完成，不能把客户端字典作为SQL列名或条件。未指定平台和所有个人资料保持原值。
+MySQL使用employees与platform_admins，并新增[平台权限协调表](../../capability/application/platform-permission-initialization.md#迁移与上线)。事务先锁共享gate，再锁定员工并核对内部读取的权限快照；写权限JSON、人工决策标记、事务outbox和指定平台的管理员关联。JSON生成与SQL参数绑定在服务端完成，不能把客户端字典作为SQL列名或条件。未指定平台和所有个人资料保持原值。
 
 数据库提交后再发送中央请求。权限发送当前完整映射，符合中间件permissions整体替换语义；姓名和部门字段省略，保留中央当前资料。管理员增删以MySQL当前成员关系为准，不反复替换其他平台的管理员集合。
 

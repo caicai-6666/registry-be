@@ -28,6 +28,8 @@ from app.repository.personnel_sync import SQLitePersonnelSyncRepository
 from app.service.personnel_refresh import PersonnelRefreshService
 from app.repository.user_access_sync import SQLiteUserAccessSyncRepository
 from app.service.user_access import UserAccessService
+from app.repository.platform_permission import PlatformPermissionRepository
+from app.service.platform_permission import PlatformPermissionService
 from app.infrastructure.knowledge import KnowledgeClient
 from app.repository.employee import MySQLEmployeeRepository
 from app.service.auth import AuthService
@@ -146,15 +148,22 @@ def create_app(
             files = ReviewFileService(ingestion)
             application.state.review_file_service = files
             await files.initialize()
+            permission_repository = PlatformPermissionRepository(employees)
+            permission_sync = PlatformPermissionService(permission_repository, service, client,
+                retry_seconds=middleware.retry_interval_seconds, timeout_seconds=middleware.request_timeout_seconds)
+            application.state.platform_permission_service = permission_sync
+            resources.push_async_callback(permission_sync.close)
+            await permission_sync.start()
             directory = PlatformDirectoryService(
                 platform_directory_settings or load_platform_directory_settings(), service, middleware=middleware,
+                permission_repository=permission_repository,
             )
             application.state.platform_directory_service = directory
             resources.push_async_callback(directory.close)
             await directory.start()
             application.state.user_access_service = UserAccessService(
                 employees, SQLiteUserAccessSyncRepository(sqlite), service, client, directory,
-                timeout_seconds=middleware.request_timeout_seconds)
+                timeout_seconds=middleware.request_timeout_seconds, permission_sync=permission_sync)
             platform_admins = PlatformAdminService(authorization, employees, service, client)
             application.state.platform_admin_service = platform_admins
             resources.push_async_callback(platform_admins.close)

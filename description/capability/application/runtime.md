@@ -217,3 +217,10 @@ python -B -m unittest discover -s tests -p 'test_development_entry_prefix.py' -v
 ```
 
 测试文件按项目规则仅本地保留，新克隆需另备。生产部署的端口、前缀覆盖与数据卷仍以统一部署配置为准。
+
+
+---
+
+## 平台默认文件权限上线
+
+发布新平台默认 0 级功能前，必须先安装共享权限 gate、平台登记、人工决策标记和 outbox 四张 MySQL 表，再发布配套知识后端与 registry。首次目录快照仅建立历史基线，不补历史缺权；基线确认后再接入新平台。此版本无新增环境变量，不能只重建后端忽略迁移。步骤与核对 SQL 见[平台权限初始化](platform-permission-initialization.md#迁移与上线)。

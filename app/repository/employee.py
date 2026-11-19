@@ -2,6 +2,9 @@
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
+
+from app.repository.platform_permission import lock_permission_gate, enqueue_permissions
 
 import aiomysql
 
@@ -60,6 +63,21 @@ class MySQLEmployeeRepository:
                     charset="utf8mb4", autocommit=True, minsize=1, maxsize=5,
                     connect_timeout=settings.connect_timeout_seconds, pool_recycle=300,
                 )
+
+    @asynccontextmanager
+    async def permission_transaction(self, *, timeout_seconds: float | None = None):
+        """权限专用事务，复用人员连接池；提交不确定时由持久标记幂等恢复。"""
+        await self._initialize()
+        async with asyncio.timeout(timeout_seconds or self._settings.operation_timeout_seconds):
+            async with self._pool.acquire() as connection:
+                await connection.begin()
+                try:
+                    async with connection.cursor(aiomysql.DictCursor) as cursor:
+                        yield cursor
+                    await connection.commit()
+                except BaseException:
+                    await asyncio.shield(connection.rollback())
+                    raise
 
     async def find_by_userid(self, userid: str) -> AuthenticatedUser | None:
         await self._initialize()
@@ -177,6 +195,7 @@ class MySQLEmployeeRepository:
                 await connection.begin()
                 try:
                     async with connection.cursor(aiomysql.DictCursor) as cursor:
+                        await lock_permission_gate(cursor)
                         current = await self._read_user_access(cursor, patch.userid, for_update=True)
                         if current != expected:
                             raise UserAccessError('用户权限在更新期间发生变化，请重试', status_code=409)
@@ -184,6 +203,12 @@ class MySQLEmployeeRepository:
                         if updated.platform_permissions != current.platform_permissions:
                             await cursor.execute('UPDATE employees SET platform_permissions=%s WHERE userid=%s',
                                 (json.dumps(updated.platform_permissions, ensure_ascii=False), patch.userid))
+                        for code in sorted(patch.platform_permissions):
+                            # 即便本来缺键，显式撤销也留下标记，不允许后续自动初始化补回。
+                            await cursor.execute('INSERT IGNORE INTO platform_permission_overrides(userid,platform_code) VALUES(%s,%s)',
+                                                 (patch.userid, code))
+                        if patch.platform_permissions:
+                            await enqueue_permissions(cursor, patch.userid)
                         old_admins = set(current.managed_platforms)
                         for code, enabled in sorted(patch.platform_admins.items()):
                             if enabled and code not in old_admins:

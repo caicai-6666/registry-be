@@ -92,3 +92,5 @@
 - [正式与待审文件原件 API](api/resource.md)：管理员原件与头像代理、用户文件等级下载、可信知识后端后台下载及各自认证方式。
 - [文件删除审核 API](api/deletion-review.md)：获取待删除申请、按审核员查询历史并确定是否删除。
 - [文件入库审核 API](api/ingestion-review.md)：获取待审申请与推荐通行证，确定同意或拒绝入库，并按审核员查询历史。
+
+- [新平台文件权限初始化](capability/application/platform-permission-initialization.md)：历史基线、在职员工默认 0 级、撤权保护及事务同步。

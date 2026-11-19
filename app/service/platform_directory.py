@@ -22,9 +22,11 @@ class PlatformDirectoryService:
     def __init__(
         self, settings: PlatformDirectorySettings, sessions: MiddlewareSessionService, *,
         middleware: MiddlewareSettings, client: MiddlewareClient | None = None,
+        permission_repository=None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ):
+        self._permission_repository = permission_repository
         self._settings = settings
         self._sessions = sessions
         self._middleware = middleware
@@ -68,6 +70,10 @@ class PlatformDirectoryService:
                         timeout_seconds=self._middleware.request_timeout_seconds)
                 async with asyncio.timeout(self._middleware.request_timeout_seconds):
                     platforms = await self._client.list_platforms(token)
+                if self._permission_repository is not None:
+                    if self._middleware.platform_code not in {p.code for p in platforms}:
+                        raise ValueError('平台目录缺少注册中心自身，拒绝建立权限基线')
+                    await self._permission_repository.discover([p.code for p in platforms])
             except Exception as exc:
                 self._refresh_failed = True
                 if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 401:

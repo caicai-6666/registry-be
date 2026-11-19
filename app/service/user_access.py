@@ -18,9 +18,10 @@ logger=logging.getLogger(__name__)
 class UserAccessService:
     def __init__(self,employees: MySQLEmployeeRepository,pending: SQLiteUserAccessSyncRepository,
                  sessions: MiddlewareSessionService,middleware: MiddlewareClient | None,
-                 directory: PlatformDirectoryService,*,timeout_seconds: float=40):
+                 directory: PlatformDirectoryService,*,timeout_seconds: float=40, permission_sync=None):
         self._employees,self._pending=employees,pending
         self._sessions,self._middleware,self._directory=sessions,middleware,directory
+        self._permission_sync=permission_sync
         self._timeout=timeout_seconds
         self._lock=asyncio.Lock()
 
@@ -46,8 +47,11 @@ class UserAccessService:
             try:
                 if kind == 'permissions':
                     # 中间件 permissions 是整体替换，必须发送合并后的完整当前映射。
-                    await self._middleware.update_user_info(
-                        MiddlewareUserPatch(userid=userid,permissions=current.platform_permissions),token)
+                    if self._permission_sync is not None:
+                        await self._permission_sync.publish(userid, only_pending=False)
+                    else:
+                        await self._middleware.update_user_info(
+                            MiddlewareUserPatch(userid=userid,permissions=current.platform_permissions),token)
                 else:
                     await self._middleware.set_platform_admin(code,userid,code in current.managed_platforms,token)
             except Exception as error:

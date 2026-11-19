@@ -42,9 +42,9 @@
 | 数据库已提交、部分中间件失败 | 503，database_updated=true，返回pending_updates；保留本地状态和同步标记。 |
 | 完全重复且无待同步项 | 200，不重复发布中央变更。 |
 
-SQLite标记只保存userid、操作类别、平台代码和随机修订标识；发送前重新读取MySQL状态，不重放旧请求的等级或管理员布尔载荷。仅成功的同一修订可以确认；进程重启后标记保留。当前重试入口为再次提交该用户的有效更新，不新增后台同步循环。
+SQLite标记只保存userid、操作类别、平台代码和随机修订标识；发送前重新读取MySQL状态，不重放旧请求的等级或管理员布尔载荷。仅成功的同一修订可以确认；进程重启后标记保留。文件权限另有同事务 MySQL outbox，由后台持续恢复；管理员关联仍通过再次有效提交重试。
 
-同实例更新串行并计入总超时（复用中间件请求超时配置）；跨实例通过MySQL行锁与快照冲突校验避免覆盖本地新授权。MySQL、SQLite和中央HTTP不是一个分布式事务，中央多项变更可能部分成功；接口不会将其报告为全部成功。其他后端的旧全表快照仍可能覆盖中央新值，需要统一人员源和外部切换/发布协调，进程锁不解决该问题。
+同实例更新串行并计入总超时（复用中间件请求超时配置）；跨实例通过MySQL行锁与快照冲突校验避免覆盖本地新授权。MySQL、SQLite和中央HTTP不是一个分布式事务，中央多项变更可能部分成功；接口不会将其报告为全部成功。配套知识后端与 registry 的文件权限发布使用共享 MySQL gate，最新值读取及正常 HTTP 回执在锁内完成；HTTP 超时的远端迟到提交限制见[平台权限初始化](platform-permission-initialization.md)。
 
 允许明确撤销自身registry管理权，成功后后续请求返回403；若剩余项目同步失败，需其他仍有权的管理员重试。不会自动修改其他管理员来维持自己的访问权。
 
@@ -52,7 +52,7 @@ SQLite标记只保存userid、操作类别、平台代码和随机修订标识�
 
 ## 依赖与实现
 
-复用现有MySQL、SQLite、平台会话和平台目录，无新凭据或开关。MySQL账号需要employees SELECT/UPDATE，以及platform_admins SELECT/INSERT/DELETE权限。SQLite辅助表定义见[权限变更契约](../../architecture/data/user-access.md)。
+复用现有MySQL、SQLite、平台会话和平台目录，无新凭据或开关；新增共享权限协调表，必须先完成[迁移](platform-permission-initialization.md#迁移与上线)。MySQL账号需要employees SELECT/UPDATE，以及platform_admins SELECT/INSERT/DELETE权限。SQLite辅助表定义见[权限变更契约](../../architecture/data/user-access.md)。
 
 - `app/model/user_access.py`：严格请求、当前状态与合并规则。
 - `app/repository/employee.py`：两类授权的单一事务。
