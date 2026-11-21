@@ -12,6 +12,7 @@ from app.agent.file_deduplication.tool import (
     build_file_deduplication_tools, comparison_result, finish_comparison, read_candidate_pages,
 )
 from app.config.file_deduplication import load_file_deduplication_settings
+from app.infrastructure.model_json import load_model_json, normalize_model_json
 
 
 class FileComparisonError(RuntimeError):
@@ -70,6 +71,7 @@ async def compare_files(pair: FileDeduplicationInput, context: FileDeduplication
         raise FileComparisonError("文件比较需要模型客户端")
     settings = context.settings or load_file_deduplication_settings()
     tools = build_file_deduplication_tools(max_visible_pages=settings.max_visible_pages)
+    schemas = {tool["function"]["name"]: tool["function"]["parameters"] for tool in tools}
     prefix, task_index = build_initial_messages(pair)
     # 仅保留工具执行所需的局部页面元信息，判断过程由真实对话和原生思考延续。
     visible_pages, presented_pages, observations, reads = [], set(), [], 0
@@ -105,9 +107,13 @@ async def compare_files(pair: FileDeduplicationInput, context: FileDeduplication
                 if call.type != "function" or not call.id or len(call.id) > 200:
                     raise ValueError("工具标识无效；请使用提供的真实函数工具")
                 name = call.function.name
-                if name not in {"read_candidate_pages", "finish_comparison"}:
+                if name not in schemas:
                     raise ValueError("未知工具；请选择 read_candidate_pages 或 finish_comparison")
-                arguments = json.loads(call.function.arguments)
+                arguments = load_model_json(call.function.arguments)
+                if not isinstance(arguments, dict):
+                    raise ValueError("工具参数顶层必须是 JSON 对象")
+                # 使用本轮实际发送的工具 Schema 解码嵌套字段，原始调用仍保留在审计中。
+                arguments = normalize_model_json(arguments, schemas[name])
                 if name == "read_candidate_pages":
                     parsed = read_candidate_pages(arguments, current_page_count=pair.current_file.pdf.page_count,
                         candidate_page_count=pair.similar_file.pdf.page_count, max_visible_pages=settings.max_visible_pages,
